@@ -1,0 +1,2199 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>CCX v4 — 주식 코인 거래소</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+KR:wght@300;400;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+      :root {
+        --bg: #050a0f;
+        --pn: #0b1622;
+        --p2: #0f1e2e;
+        --bd: #1a2d45;
+        --tx: #cde3f7;
+        --mu: #4a6a8a;
+        --ac: #e0ff4f;
+        --gn: #00f5a0;
+        --rd: #ff4f6e;
+        --rr: 5px;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        height: 100%;
+        background: var(--bg);
+        color: var(--tx);
+        font-family: "Noto Sans KR", sans-serif;
+        overflow-x: hidden;
+      }
+      ::-webkit-scrollbar {
+        width: 3px;
+      }
+      ::-webkit-scrollbar-track {
+        background: var(--pn);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--bd);
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        background-image:
+          linear-gradient(var(--bd) 1px, transparent 1px),
+          linear-gradient(90deg, var(--bd) 1px, transparent 1px);
+        background-size: 40px 40px;
+        opacity: 0.15;
+        pointer-events: none;
+      }
+      .mono {
+        'font-family':'SpaceMono',monospace;
+      }
+
+      /* ── LOGIN ── */
+      #lp {
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg);
+      }
+      #lp::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+          ellipse 60% 60% at 50% 40%,
+          #00f5d41a 0%,
+          transparent 70%
+        );
+      }
+      .lb {
+        position: relative;
+        z-index: 1;
+        width: min(420px, 93vw);
+        background: var(--pn);
+        border: 1px solid var(--bd);
+        border-radius: 12px;
+        padding: 38px 34px;
+        box-shadow: 0 0 60px #00f5d410;
+        animation: fu 0.5s ease;
+      }
+      @keyframes fu {
+        from {
+          opacity: 0;
+          transform: translateY(14px);
+        }
+      }
+      .ll {
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        color: var(--mu);
+        margin-bottom: 6px;
+      }
+      .lt {
+        font-size: 20px;
+        font-weight: 900;
+        margin-bottom: 22px;
+        line-height: 1.3;
+      }
+      .lt .c1 {
+        color: #00f5d4;
+      }
+      .lt .c2 {
+        color: #f5a623;
+      }
+      .trow {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 18px;
+      }
+      .tb {
+        flex: 1;
+        padding: 8px;
+        border: 1px solid var(--bd);
+        background: transparent;
+        color: var(--mu);
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        cursor: pointer;
+        border-radius: var(--rr);
+        transition: all 0.2s;
+      }
+      .tb.on {
+        border-color: #00f5d4;
+        color: #00f5d4;
+        background: #00f5d412;
+      }
+      .fi {
+        margin-bottom: 11px;
+      }
+      .fi label {
+        display: block;
+        font-size: 10px;
+        font-family: "Space Mono", monospace;
+        color: var(--mu);
+        margin-bottom: 4px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .fi input {
+        width: 100%;
+        padding: 10px 12px;
+        background: #07111c;
+        border: 1px solid var(--bd);
+        border-radius: var(--rr);
+        color: var(--tx);
+        font-size: 14px;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      .fi input:focus {
+        border-color: #00f5d4;
+        box-shadow: 0 0 0 2px #00f5d415;
+      }
+      .bp {
+        width: 100%;
+        padding: 12px;
+        background: #00f5d4;
+        color: #000;
+        font-weight: 700;
+        font-size: 14px;
+        border: none;
+        border-radius: var(--rr);
+        cursor: pointer;
+        transition: opacity 0.2s;
+        letter-spacing: 0.02em;
+      }
+      .bp:hover {
+        opacity: 0.85;
+      }
+      .lm {
+        margin-top: 10px;
+        font-size: 12px;
+        text-align: center;
+        min-height: 18px;
+        color: var(--rd);
+      }
+      .lm.ok {
+        color: var(--gn);
+      }
+
+      /* ── APP ── */
+      #app {
+        display: none;
+        min-height: 100vh;
+        position: relative;
+        z-index: 1;
+      }
+
+      /* ── TOPBAR ── */
+      .top {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background: #050a0fcc;
+        backdrop-filter: blur(14px);
+        border-bottom: 1px solid var(--bd);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 14px;
+        height: 50px;
+      }
+      .logo {
+        font-family: "Space Mono", monospace;
+        font-size: 12px;
+        font-weight: 700;
+        color: #00f5d4;
+        white-space: nowrap;
+      }
+      .logo span {
+        color: #f5a623;
+      }
+      .tkw {
+        flex: 1;
+        overflow: hidden;
+        position: relative;
+      }
+      .tkw::before,
+      .tkw::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 20px;
+        z-index: 2;
+        pointer-events: none;
+      }
+      .tkw::before {
+        left: 0;
+        background: linear-gradient(90deg, #050a0fcc, transparent);
+      }
+      .tkw::after {
+        right: 0;
+        background: linear-gradient(-90deg, #050a0fcc, transparent);
+      }
+      .tkt {
+        display: flex;
+        gap: 20px;
+        animation: sk 35s linear infinite;
+        white-space: nowrap;
+      }
+      @keyframes sk {
+        0% {
+          transform: translateX(0);
+        }
+        100% {
+          transform: translateX(-50%);
+        }
+      }
+      .ti {
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        color: var(--mu);
+      }
+      .ti .v {
+        color: var(--tx);
+      }
+      .ti .u {
+        color: var(--gn);
+      }
+      .ti .d {
+        color: var(--rd);
+      }
+      .tr {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-left: auto;
+      }
+      .wdot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--mu);
+        transition: background 0.4s;
+        flex-shrink: 0;
+      }
+      .wdot.ok {
+        background: var(--gn);
+      }
+      .wdot.er {
+        background: var(--rd);
+      }
+      .bdg {
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        color: var(--mu);
+        background: var(--pn);
+        border: 1px solid var(--bd);
+        border-radius: 3px;
+        padding: 3px 8px;
+      }
+      .bdg span {
+        color: var(--ac);
+      }
+      .bsm {
+        padding: 4px 10px;
+        border: 1px solid var(--bd);
+        background: transparent;
+        color: var(--mu);
+        font-size: 10px;
+        font-family: "Space Mono", monospace;
+        border-radius: 3px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .bsm:hover {
+        border-color: var(--rd);
+        color: var(--rd);
+      }
+      .bsa {
+        border-color: var(--ac) !important;
+        color: var(--ac) !important;
+      }
+
+      /* ── LAYOUT ── */
+      .lay {
+        display: grid;
+        grid-template-columns: 210px 1fr 270px;
+        min-height: calc(100vh - 50px);
+      }
+
+      /* ── SIDEBAR ── */
+      .sb {
+        border-right: 1px solid var(--bd);
+        padding: 10px 8px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+      }
+      .sl {
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        letter-spacing: 0.15em;
+        color: var(--mu);
+        text-transform: uppercase;
+        padding: 5px 4px 3px;
+        border-bottom: 1px solid var(--bd);
+        margin-top: 7px;
+      }
+      .sl:first-child {
+        margin-top: 0;
+      }
+      .ar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 5px 7px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background 0.12s;
+        border: 1px solid transparent;
+      }
+      .ar:hover {
+        background: var(--p2);
+      }
+      .ar.sel {
+        background: var(--p2);
+        border-color: var(--bd);
+      }
+      .al {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .an {
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .asy {
+        font-size: 9px;
+        color: var(--mu);
+        font-family: "Space Mono", monospace;
+      }
+      .ar2 {
+        text-align: right;
+      }
+      .ap {
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+      }
+      .ac2 {
+        font-family: "Space Mono", monospace;
+        font-size: 9px;
+      }
+      .ac2.u {
+        color: var(--gn);
+      }
+      .ac2.d {
+        color: var(--rd);
+      }
+
+      /* ── MAIN ── */
+      .mn {
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        overflow-y: auto;
+      }
+      .mts {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .mt {
+        padding: 5px 11px;
+        border: 1px solid var(--bd);
+        background: transparent;
+        color: var(--mu);
+        font-size: 10px;
+        font-family: "Space Mono", monospace;
+        border-radius: 3px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .mt.on {
+        border-color: #00f5d4;
+        color: #00f5d4;
+        background: #00f5d412;
+      }
+
+      /* chart */
+      .ch {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      .cn {
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .cp {
+        font-family: "Space Mono", monospace;
+        font-size: 26px;
+        font-weight: 700;
+      }
+      .cc {
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        margin-top: 2px;
+      }
+      .cc.u {
+        color: var(--gn);
+      }
+      .cc.d {
+        color: var(--rd);
+      }
+      .cb {
+        background: var(--pn);
+        border: 1px solid var(--bd);
+        border-radius: var(--rr);
+        padding: 12px;
+        height: 240px;
+        position: relative;
+        overflow: hidden;
+      }
+      .mg {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .mb {
+        background: var(--pn);
+        border: 1px solid var(--bd);
+        border-radius: var(--rr);
+        padding: 9px;
+        height: 115px;
+        position: relative;
+        overflow: hidden;
+      }
+      .ml {
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        margin-bottom: 3px;
+      }
+
+      /* trade */
+      .tb2 {
+        background: var(--pn);
+        border: 1px solid var(--bd);
+        border-radius: var(--rr);
+        padding: 15px;
+      }
+      .ttl {
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        letter-spacing: 0.15em;
+        color: var(--mu);
+        text-transform: uppercase;
+        margin-bottom: 11px;
+      }
+      .tts {
+        display: flex;
+        gap: 5px;
+        margin-bottom: 11px;
+      }
+      .tt {
+        flex: 1;
+        padding: 8px 6px;
+        border: 1px solid var(--bd);
+        background: transparent;
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        cursor: pointer;
+        border-radius: 4px;
+        color: var(--mu);
+        transition: all 0.2s;
+        text-align: center;
+        line-height: 1.4;
+      }
+      .tt.by.on {
+        border-color: var(--gn);
+        color: var(--gn);
+        background: #00f5a018;
+      }
+      .tt.sl.on {
+        border-color: var(--rd);
+        color: var(--rd);
+        background: #ff4f6e18;
+      }
+      .tsel {
+        width: 100%;
+        padding: 8px 10px;
+        background: #07111c;
+        border: 1px solid var(--bd);
+        border-radius: 4px;
+        color: var(--tx);
+        font-size: 12px;
+        font-family: "Space Mono", monospace;
+        outline: none;
+        margin-bottom: 9px;
+      }
+      .tf {
+        margin-bottom: 9px;
+      }
+      .tf label {
+        display: block;
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        color: var(--mu);
+        margin-bottom: 3px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .tf input {
+        width: 100%;
+        padding: 8px 10px;
+        background: #07111c;
+        border: 1px solid var(--bd);
+        border-radius: 4px;
+        color: var(--tx);
+        font-size: 12px;
+        font-family: "Space Mono", monospace;
+        outline: none;
+      }
+      .tot {
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: var(--mu);
+        margin-bottom: 9px;
+      }
+      .tot span {
+        color: var(--ac);
+      }
+      .bbuy {
+        width: 100%;
+        padding: 10px;
+        background: var(--gn);
+        color: #000;
+        font-weight: 700;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: opacity 0.2s;
+      }
+      .bsell {
+        width: 100%;
+        padding: 10px;
+        background: var(--rd);
+        color: #fff;
+        font-weight: 700;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: opacity 0.2s;
+      }
+      .bbuy:hover,
+      .bsell:hover {
+        opacity: 0.8;
+      }
+      .tmsg {
+        margin-top: 7px;
+        font-size: 11px;
+        font-family: "Space Mono", monospace;
+        min-height: 16px;
+        color: var(--gn);
+        text-align: center;
+      }
+      .tmsg.er {
+        color: var(--rd);
+      }
+      .hint {
+        margin-top: 9px;
+        padding-top: 8px;
+        border-top: 1px solid var(--bd);
+        font-size: 10px;
+        color: var(--mu);
+        font-family: "Space Mono", monospace;
+        line-height: 1.6;
+      }
+
+      /* balance */
+      .bx {
+        background: var(--pn);
+        border: 1px solid var(--bd);
+        border-radius: var(--rr);
+        padding: 13px;
+      }
+      .bxt {
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        letter-spacing: 0.15em;
+        color: var(--mu);
+        text-transform: uppercase;
+        margin-bottom: 9px;
+      }
+      .bta {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+      }
+      .bta th {
+        color: var(--mu);
+        padding: 3px 6px;
+        text-align: left;
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        border-bottom: 1px solid var(--bd);
+        font-family: "Space Mono", monospace;
+      }
+      .bta td {
+        padding: 5px 6px;
+        font-family: "Space Mono", monospace;
+        border-bottom: 1px solid #1a2d4514;
+      }
+      .bta tr:last-child td {
+        border-bottom: none;
+      }
+      .ptot {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--ac);
+        font-family: "Space Mono", monospace;
+        margin-bottom: 2px;
+      }
+      .psub {
+        font-size: 9px;
+        color: var(--mu);
+        font-family: "Space Mono", monospace;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 11px;
+      }
+
+      /* tx table */
+      .txta {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+        font-family: "Space Mono", monospace;
+      }
+      .txta th {
+        color: var(--mu);
+        padding: 4px 6px;
+        text-align: left;
+        font-size: 9px;
+        border-bottom: 1px solid var(--bd);
+      }
+      .txta td {
+        padding: 5px 6px;
+        border-bottom: 1px solid #1a2d4514;
+      }
+
+      /* ── RIGHT PANEL ── */
+      .rp {
+        border-left: 1px solid var(--bd);
+        padding: 10px 9px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .rpt {
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        letter-spacing: 0.15em;
+        color: var(--mu);
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+
+      /* news batch */
+      .nbatch {
+        background: var(--p2);
+        border: 1px solid var(--bd);
+        border-radius: 5px;
+        padding: 8px 9px;
+        margin-bottom: 6px;
+        animation: fi 0.35s ease;
+      }
+      @keyframes fi {
+        from {
+          opacity: 0;
+          transform: translateY(-5px);
+        }
+      }
+      .nbtime {
+        font-size: 9px;
+        color: var(--mu);
+        font-family: "Space Mono", monospace;
+        margin-bottom: 6px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--bd);
+      }
+      .ni {
+        padding: 5px 0;
+        border-bottom: 1px solid var(--bd) 60;
+      }
+      .ni:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+      .nh {
+        font-size: 11px;
+        line-height: 1.4;
+        margin-bottom: 3px;
+      }
+      .ntgs {
+        display: flex;
+        gap: 3px;
+        flex-wrap: wrap;
+      }
+      .ntg {
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        padding: 1px 5px;
+        border-radius: 2px;
+      }
+      .ntg.u {
+        background: #00f5a016;
+        color: var(--gn);
+      }
+      .ntg.d {
+        background: #ff4f6e16;
+        color: var(--rd);
+      }
+
+      /* trade feed */
+      .fr {
+        background: var(--pn);
+        border: 1px solid var(--bd);
+        border-radius: 4px;
+        padding: 6px 8px;
+        margin-bottom: 4px;
+        display: flex;
+        justify-content: space-between;
+        animation: fi 0.3s ease;
+      }
+      .fw {
+        font-size: 10px;
+        color: var(--mu);
+        font-family: "Space Mono", monospace;
+      }
+      .fd {
+        font-size: 10px;
+        font-family: "Space Mono", monospace;
+      }
+      .fd.by {
+        color: var(--gn);
+      }
+      .fd.sl {
+        color: var(--rd);
+      }
+
+      /* announce */
+      .ann {
+        position: fixed;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%) translateY(-100%);
+        z-index: 400;
+        background: var(--ac);
+        color: #000;
+        font-weight: 700;
+        font-size: 12px;
+        padding: 8px 22px;
+        border-radius: 0 0 8px 8px;
+        transition: transform 0.4s;
+        max-width: 90vw;
+        text-align: center;
+      }
+      .ann.sh {
+        transform: translateX(-50%) translateY(0);
+      }
+
+      /* ── ADMIN ── */
+      #adm {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 300;
+        background: #000d;
+        backdrop-filter: blur(6px);
+        align-items: flex-start;
+        justify-content: center;
+        overflow-y: auto;
+        padding: 18px;
+      }
+      #adm.op {
+        display: flex;
+      }
+      .ab {
+        background: var(--pn);
+        border: 1px solid var(--bd);
+        border-radius: 10px;
+        width: min(820px, 96vw);
+        margin: auto;
+        padding: 22px;
+      }
+      .at {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 2px;
+      }
+      .at span {
+        color: var(--ac);
+      }
+      .as {
+        font-size: 11px;
+        color: var(--mu);
+        margin-bottom: 16px;
+      }
+      .asec {
+        margin-bottom: 18px;
+      }
+      .asec h3 {
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        letter-spacing: 0.15em;
+        color: var(--mu);
+        text-transform: uppercase;
+        padding-bottom: 5px;
+        border-bottom: 1px solid var(--bd);
+        margin-bottom: 9px;
+      }
+      .arow {
+        display: flex;
+        gap: 7px;
+        margin-bottom: 7px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+      }
+      .af {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        flex: 1;
+        min-width: 85px;
+      }
+      .af label {
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        color: var(--mu);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .af input,
+      .af select {
+        padding: 7px 9px;
+        background: #07111c;
+        border: 1px solid var(--bd);
+        border-radius: 4px;
+        color: var(--tx);
+        font-size: 12px;
+        font-family: "Space Mono", monospace;
+        outline: none;
+      }
+      .ba {
+        padding: 7px 13px;
+        background: var(--ac);
+        color: #000;
+        font-weight: 700;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .bc {
+        padding: 7px 13px;
+        background: transparent;
+        color: var(--mu);
+        border: 1px solid var(--bd);
+        border-radius: 4px;
+        cursor: pointer;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+      }
+      .bc:hover {
+        color: var(--rd);
+        border-color: var(--rd);
+      }
+      .am {
+        font-size: 11px;
+        font-family: "Space Mono", monospace;
+        color: var(--gn);
+        min-height: 16px;
+      }
+      .am.er {
+        color: var(--rd);
+      }
+      .ut {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+        font-family: "Space Mono", monospace;
+      }
+      .ut th {
+        text-align: left;
+        color: var(--mu);
+        padding: 4px 6px;
+        border-bottom: 1px solid var(--bd);
+        font-size: 9px;
+        letter-spacing: 0.1em;
+      }
+      .ut td {
+        padding: 5px 6px;
+        border-bottom: 1px solid #1a2d4520;
+      }
+      .be {
+        background: var(--p2);
+        border: 1px solid var(--bd);
+        border-radius: 5px;
+        padding: 12px;
+        margin-top: 9px;
+      }
+      .bet {
+        font-size: 10px;
+        font-family: "Space Mono", monospace;
+        color: var(--mu);
+        margin-bottom: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .beg {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 6px;
+      }
+      .ber {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--pn);
+        border: 1px solid var(--bd);
+        border-radius: 4px;
+        padding: 5px 7px;
+      }
+      .ber label {
+        font-size: 9px;
+        font-family: "Space Mono", monospace;
+        color: var(--mu);
+        width: 36px;
+        flex-shrink: 0;
+      }
+      .ber input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        color: var(--tx);
+        font-size: 11px;
+        font-family: "Space Mono", monospace;
+        outline: none;
+        min-width: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- LOGIN -->
+    <div id="lp">
+      <div class="lb">
+        <div class="ll">CLASS COIN EXCHANGE v4.0</div>
+        <div class="lt">
+          <span class="c1">업핏</span>코인 &amp;
+          <span class="c2">다윗</span>코인 학급 거래소
+        </div>
+        <div class="trow">
+          <button class="tb on" onclick="stab('login')">로그인</button>
+          <button class="tb" onclick="stab('reg')">회원가입</button>
+        </div>
+        <div id="lf">
+          <div class="fi">
+            <label>학번</label><input id="ls" placeholder="ex) 10101" />
+          </div>
+          <div class="fi">
+            <label>아이디</label><input id="lu" placeholder="아이디" />
+          </div>
+          <div class="fi">
+            <label>비밀번호</label
+            ><input
+              id="lpw"
+              type="password"
+              placeholder="비밀번호"
+              onkeydown="if (event.key === 'Enter') doLogin();"
+            />
+          </div>
+          <button class="bp" onclick="doLogin()">로그인</button>
+        </div>
+        <div id="rf" style="display: none">
+          <div class="fi">
+            <label>학번</label><input id="rs" placeholder="ex) 10102" />
+          </div>
+          <div class="fi">
+            <label>아이디</label><input id="ru" placeholder="사용할 아이디" />
+          </div>
+          <div class="fi">
+            <label>비밀번호</label
+            ><input id="rpw" type="password" placeholder="비밀번호" />
+          </div>
+          <button class="bp" onclick="doReg()">가입하고 코인 받기 🎉</button>
+        </div>
+        <div class="lm" id="lmsg"></div>
+      </div>
+    </div>
+
+    <div class="ann" id="ann"></div>
+
+    <!-- APP -->
+    <div id="app">
+      <!-- TOPBAR -->
+      <div class="top">
+        <div class="logo">CCX<span>●</span></div>
+        <div class="tkw"><div class="tkt" id="tkt"></div></div>
+        <div class="tr">
+          <div class="wdot" id="wdot" title="서버 연결 상태"></div>
+          <div class="bdg" id="bdg">학번 <span>-</span></div>
+          <button
+            class="bsm bsa"
+            id="admBtn"
+            style="display: none"
+            onclick="openAdm()"
+          >
+            ⚙ 관리자
+          </button>
+          <button class="bsm" onclick="doLogout()">로그아웃</button>
+        </div>
+      </div>
+
+      <div class="lay">
+        <!-- SIDEBAR: 자산 목록 -->
+        <div class="sb" id="sb"></div>
+
+        <!-- MAIN -->
+        <div class="mn">
+          <div class="mts">
+            <button class="mt on" onclick="mTab('chart', this)">📈 차트</button>
+            <button class="mt" onclick="mTab('trade', this)">
+              💱 매수/매도
+            </button>
+            <button class="mt" onclick="mTab('bal', this)">💼 잔고</button>
+            <button class="mt" onclick="mTab('tx', this)">📋 거래내역</button>
+          </div>
+
+          <!-- 차트 -->
+          <div id="tChart">
+            <div class="ch">
+              <div>
+                <div class="cn" id="cname">-</div>
+                <div class="cp" id="cprice">-</div>
+                <div class="cc" id="cchg">-</div>
+              </div>
+              <div
+                style="
+                  display: flex;
+                  gap: 4px;
+                  flex-wrap: wrap;
+                  justify-content: flex-end;
+                "
+              >
+                <button class="mt on" onclick="setPd(50, this)">최근 50</button>
+                <button class="mt" onclick="setPd(100, this)">전체 100</button>
+              </div>
+            </div>
+            <div class="cb">
+              <canvas id="mc" width="800" height="216"></canvas>
+            </div>
+            <div class="mg">
+              <div class="mb">
+                <div class="ml" style="color: #00f5d4">업핏코인 UPC</div>
+                <canvas id="mu" width="380" height="88"></canvas>
+              </div>
+              <div class="mb">
+                <div class="ml" style="color: #f5a623">다윗코인 DWC</div>
+                <canvas id="md" width="380" height="88"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- 매수/매도 -->
+          <div id="tTrade" style="display: none">
+            <div class="tb2">
+              <div class="ttl">주식·코인 매수 / 매도</div>
+              <div class="tts">
+                <button class="tt by on" id="tby" onclick="setAct('buy')">
+                  ▲ 매수<br /><span style="font-size: 9px; opacity: 0.7"
+                    >KRW 지불 → 자산 취득</span
+                  >
+                </button>
+                <button class="tt sl" id="tsl" onclick="setAct('sell')">
+                  ▼ 매도<br /><span style="font-size: 9px; opacity: 0.7"
+                    >자산 반납 → KRW 수령</span
+                  >
+                </button>
+              </div>
+              <div class="tf">
+                <label>자산 선택</label>
+                <select class="tsel" id="tasel" onchange="onAS()"></select>
+              </div>
+              <div class="tf">
+                <label>현재가</label><input id="tpr" readonly />
+              </div>
+              <div class="tf">
+                <label>수량</label
+                ><input
+                  id="tamt"
+                  type="number"
+                  min="0.001"
+                  step="0.001"
+                  placeholder="0.000"
+                  oninput="calcT()"
+                />
+              </div>
+              <div class="tot">
+                <span id="tactL" style="color: var(--gn)">매수</span> 총액:
+                <span id="ttot">0원</span>
+              </div>
+              <button class="bbuy" id="texec" onclick="doTrade()">
+                ▲ 매수 실행
+              </button>
+              <div class="tmsg" id="tmsg"></div>
+              <div class="hint">
+                💡 <b>매수</b> = 원화(KRW)를 지불하고 자산을 구매<br />
+                💡 <b>매도</b> = 보유한 자산을 팔아 원화(KRW)를 수령
+              </div>
+            </div>
+          </div>
+
+          <!-- 잔고 -->
+          <div id="tBal" style="display: none">
+            <div class="bx">
+              <div class="bxt">내 포트폴리오</div>
+              <div class="ptot" id="ptot">0원</div>
+              <div class="psub">총 평가금액 (KRW 포함)</div>
+              <table class="bta">
+                <thead>
+                  <tr>
+                    <th>심볼</th>
+                    <th>이름</th>
+                    <th>보유량</th>
+                    <th>현재가</th>
+                    <th>평가금액</th>
+                  </tr>
+                </thead>
+                <tbody id="balb"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 거래내역 -->
+          <div id="tTx" style="display: none">
+            <div class="bx">
+              <div class="bxt">내 거래 내역</div>
+              <table class="txta">
+                <thead>
+                  <tr>
+                    <th>시간</th>
+                    <th>자산</th>
+                    <th>구분</th>
+                    <th>수량</th>
+                    <th>단가</th>
+                    <th>금액</th>
+                  </tr>
+                </thead>
+                <tbody id="txb"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: 뉴스 + 거래피드 -->
+        <div class="rp">
+          <div>
+            <div class="rpt">
+              📰 뉴스 피드
+              <span style="font-size: 8px">(15초마다 4개 동시 발표)</span>
+            </div>
+            <div id="nf"></div>
+          </div>
+          <div>
+            <div class="rpt">⚡ 실시간 거래</div>
+            <div id="tf2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN -->
+    <div id="adm">
+      <div class="ab">
+        <div class="at">⚙ <span>관리자</span> 패널</div>
+        <div class="as">학번 10933 전용 · CCX v4.0 · 뉴스 304개</div>
+
+        <div class="asec">
+          <h3>📢 전체 공지 브로드캐스트</h3>
+          <div class="arow">
+            <div class="af" style="flex: 3">
+              <label>공지 메시지</label
+              ><input id="aMsg" placeholder="전체 공지 내용 입력" />
+            </div>
+            <button class="ba" onclick="aAnn()">전송</button>
+          </div>
+        </div>
+
+        <div class="asec">
+          <h3>🚀 뉴스 즉시 발행</h3>
+          <div class="arow">
+            <button class="ba" onclick="aFireNews()">뉴스 4개 즉시 발행</button>
+            <div class="am" id="aNM" style="align-self: center"></div>
+          </div>
+        </div>
+
+        <div class="asec">
+          <h3>💰 자산 지급 (잔고에 추가)</h3>
+          <div class="arow">
+            <div class="af">
+              <label>대상 아이디</label
+              ><input id="aGU" placeholder="username" />
+            </div>
+            <div class="af">
+              <label>자산 종류</label
+              ><select id="aGS">
+                <option value="KRW">KRW (원화)</option>
+              </select>
+            </div>
+            <div class="af">
+              <label>수량</label
+              ><input id="aGA" type="number" placeholder="0" />
+            </div>
+            <button class="ba" onclick="aGive()">지급</button>
+          </div>
+          <div class="am" id="aGM"></div>
+        </div>
+
+        <div class="asec">
+          <h3>✏️ 회원 잔고 직접 설정 (전체 조정)</h3>
+          <div class="arow">
+            <div class="af">
+              <label>대상 유저</label
+              ><select id="aSU" onchange="loadBE()"></select>
+            </div>
+            <button class="ba" onclick="loadBE()">불러오기</button>
+          </div>
+          <div class="be" id="be" style="display: none">
+            <div class="bet">잔고 수정 — <span id="ben">-</span></div>
+            <div class="beg" id="beg"></div>
+            <div
+              style="
+                margin-top: 9px;
+                display: flex;
+                gap: 8px;
+                align-items: center;
+              "
+            >
+              <button class="ba" onclick="saveBE()">저장 (전체 반영)</button>
+              <div class="am" id="aBM"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="asec">
+          <h3>📉 시세 직접 설정</h3>
+          <div class="arow">
+            <div class="af">
+              <label>자산</label
+              ><select id="aPS"></select>
+            </div>
+            <div class="af">
+              <label>새 가격 (원)</label
+              ><input id="aPV" type="number" placeholder="1000" />
+            </div>
+            <button class="ba" onclick="aSetP()">설정</button>
+          </div>
+          <div class="am" id="aPM"></div>
+        </div>
+
+        <div class="asec">
+          <h3>👥 전체 회원 목록</h3>
+          <table class="ut">
+            <thead>
+              <tr>
+                <th>학번</th>
+                <th>아이디</th>
+                <th>KRW</th>
+                <th>UPC</th>
+                <th>DWC</th>
+                <th>가입일</th>
+              </tr>
+            </thead>
+            <tbody id="utb"></tbody>
+          </table>
+        </div>
+
+        <div class="asec">
+          <h3>📋 전체 거래내역 (최근 30건)</h3>
+          <table class="txta">
+            <thead>
+              <tr>
+                <th>시간</th>
+                <th>유저</th>
+                <th>자산</th>
+                <th>구분</th>
+                <th>수량</th>
+                <th>금액</th>
+              </tr>
+            </thead>
+            <tbody id="atxb"></tbody>
+          </table>
+        </div>
+
+        <div style="text-align: right; margin-top: 12px">
+          <button class="bc" onclick="closeAdm()">닫기</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      "use strict";
+      /* ── CONFIG ── */
+      const API = "/api";
+      const WSU =
+        (location.protocol === "https:" ? "wss://" : "ws://") + location.host;
+
+      let token = localStorage.getItem("ccx_t") || "";
+      let me = null,
+        ws = null;
+      let assets = {},
+        selSym = "UPC",
+        period = 50,
+        trAct = "buy",
+        trSym = "UPC";
+      let mChart = null,
+        muC = null,
+        mdC = null;
+
+      const SECTS = {
+        coin: "🪙 코인",
+        oil: "🛢️ 석유",
+        semiconductor: "💾 반도체",
+        ai: "🤖 AI",
+        aerospace: "🚀 항공우주",
+        medical: "🏥 의료",
+        service: "🛎️ 서비스",
+        clothing: "👗 의류",
+        distribution: "📦 유통",
+        bio: "🧬 바이오",
+        electronics: "📱 전자기기",
+      };
+      const SORD = [
+        "coin",
+        "oil",
+        "semiconductor",
+        "ai",
+        "aerospace",
+        "medical",
+        "service",
+        "clothing",
+        "distribution",
+        "bio",
+        "electronics",
+      ];
+
+      /* ── HELPERS ── */
+      const g = (id) => document.getElementById(id);
+      const fmt = (n) =>
+        parseFloat(n).toLocaleString("ko-KR", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      const fmtI = (n) => Math.round(n).toLocaleString("ko-KR");
+
+      async function api(url, opt = {}) {
+        try {
+          const r = await fetch(url, {
+            ...opt,
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer " + token,
+              ...(opt.headers || {}),
+            },
+          });
+          return await r.json();
+        } catch {
+          return null;
+        }
+      }
+      const GET = (url) => api(url);
+      const POST = (url, b) =>
+        api(url, { method: "POST", body: JSON.stringify(b) });
+
+      /* ── LOGIN ── */
+      function stab(t) {
+        document
+          .querySelectorAll(".tb")
+          .forEach((b, i) =>
+            b.classList.toggle(
+              "on",
+              (i === 0 && t === "login") || (i === 1 && t === "reg"),
+            ),
+          );
+        g("lf").style.display = t === "login" ? "" : "none";
+        g("rf").style.display = t === "reg" ? "" : "none";
+        g("lmsg").textContent = "";
+      }
+      async function doLogin() {
+        const r = await POST(`${API}/login`, {
+          studentId: g("ls").value.trim(),
+          username: g("lu").value.trim(),
+          password: g("lpw").value,
+        });
+        if (!r || r.error) {
+          lmsg(r?.error || "서버 연결 실패");
+          return;
+        }
+        token = r.token;
+        localStorage.setItem("ccx_t", token);
+        me = r.user;
+        initApp();
+      }
+      async function doReg() {
+        const r = await POST(`${API}/register`, {
+          studentId: g("rs").value.trim(),
+          username: g("ru").value.trim(),
+          password: g("rpw").value,
+        });
+        lmsg(r?.error || r?.message || "오류", !r?.error);
+        if (!r?.error) setTimeout(() => stab("login"), 1400);
+      }
+      function lmsg(m, ok = false) {
+        const e = g("lmsg");
+        e.textContent = m;
+        e.className = "lm" + (ok ? " ok" : "");
+      }
+      function doLogout() {
+        localStorage.removeItem("ccx_t");
+        token = "";
+        me = null;
+        if (ws) ws.close();
+        g("app").style.display = "none";
+        g("lp").style.display = "flex";
+      }
+
+      /* ═══════════════════════════════════════════
+   ★★★ 핵심 수정: REST API로 즉시 로드
+   WebSocket을 기다리지 않음 → 화면 즉시 표시
+═══════════════════════════════════════════ */
+      async function initApp() {
+        g("lp").style.display = "none";
+        g("app").style.display = "block";
+
+        // 1) REST로 즉시 모든 데이터 로드 (WS 불필요)
+        const [meR, aR, nR] = await Promise.all([
+          GET(`${API}/me`),
+          GET(`${API}/assets`),
+          GET(`${API}/news`),
+        ]);
+
+        if (!meR || meR.error) {
+          doLogout();
+          return;
+        }
+        me = meR;
+
+        // 2) 자산 상태 초기화
+        if (aR) {
+          Object.entries(aR).forEach(([sym, a]) => {
+            assets[sym] = { ...a, history: [], prev: a.prev || a.price };
+          });
+        }
+
+        // 3) UI 즉시 구성
+        buildSB();
+        buildTSel();
+        buildAdmSel();
+        selAsset("UPC");
+        updTicker();
+        g("bdg").innerHTML =
+          `학번 <span>${me.studentId}</span> · ${me.username}`;
+        if (me.isAdmin) g("admBtn").style.display = "";
+
+        // 4) 뉴스 초기 표시 (배치 단위)
+        if (nR && nR.length) nR.forEach((b) => prepBatch(b));
+
+        // 5) 히스토리 먼저 로드 → 그 다음 차트 초기화
+        const symKeys = Object.keys(assets);
+        const histResults = await Promise.all(
+          symKeys.map((s) => GET(`${API}/assets/${s}/history`)),
+        );
+        symKeys.forEach((s, i) => {
+          const h = histResults[i];
+          if (h && Array.isArray(h) && h.length > 0)
+            assets[s].history = h.map((x) => ({ t: x.t, p: x.p }));
+        });
+
+        /* 차트 초기화:
+     - 히스토리 데이터가 준비된 상태
+     - responsive:false + canvas 명시적 크기로 레이아웃 타이밍 무관
+     - setTimeout 0: 현재 콜스택 비운 뒤 실행 (DOM paint 이후 보장) */
+        setTimeout(() => {
+          initCharts();
+          rebuildMC();
+          updMinis();
+        }, 0);
+
+        // 6) WS는 실시간 업데이트용 (연결 실패해도 UI는 이미 표시됨)
+        connectWS();
+      }
+
+      /* 자동 로그인 */
+      window.addEventListener("DOMContentLoaded", async () => {
+        if (token) {
+          try {
+            const r = await GET(`${API}/me`);
+            if (r && !r.error) {
+              me = r;
+              initApp();
+              return;
+            }
+          } catch {}
+        }
+      });
+
+      /* ── WebSocket (실시간 업데이트 전용) ── */
+      function connectWS() {
+        ws = new WebSocket(WSU);
+        ws.onopen = () => (g("wdot").className = "wdot ok");
+        ws.onclose = () => {
+          g("wdot").className = "wdot er";
+          setTimeout(connectWS, 4000);
+        };
+        ws.onerror = () => (g("wdot").className = "wdot er");
+        ws.onmessage = (e) => {
+          const m = JSON.parse(e.data);
+
+          if (m.type === "INIT") {
+            // WS 연결 후 히스토리 보강
+            Object.entries(m.data.assets).forEach(([sym, a]) => {
+              if (assets[sym] && a.history?.length)
+                assets[sym].history = a.history.map((h) => ({
+                  t: h.t,
+                  p: h.p,
+                }));
+            });
+            rebuildMC();
+            updMinis();
+          }
+
+          if (m.type === "PRICE") {
+            Object.entries(m.data.assets).forEach(([sym, d]) => {
+              if (!assets[sym]) return;
+              assets[sym].price = d.price;
+              assets[sym].prev = d.prev || d.price;
+              assets[sym].ch24 = d.ch24;
+              assets[sym].history.push({ t: m.data.ts, p: d.price });
+              if (assets[sym].history.length > 500) assets[sym].history.shift();
+            });
+            updSB();
+            updTicker();
+            updMC();
+            updMinis();
+            updCH();
+            updTP();
+            if (g("tBal").style.display !== "none") updBal();
+          }
+
+          if (m.type === "NEWS_BATCH")
+            prepBatch({ batch: m.data, ts: m.data[0]?.ts });
+
+          if (m.type === "TRADE") prepFeed(m.data);
+
+          if (m.type === "ANNOUNCE") showAnn(m.data.message);
+        };
+      }
+
+      /* ── SIDEBAR ── */
+      function buildSB() {
+        const sb = g("sb");
+        sb.innerHTML = "";
+        SORD.forEach((sec) => {
+          const syms = Object.keys(assets).filter(
+            (s) => assets[s].sector === sec,
+          );
+          if (!syms.length) return;
+          const l = document.createElement("div");
+          l.className = "sl";
+          l.textContent = SECTS[sec] || sec;
+          sb.appendChild(l);
+          syms.forEach((sym) => {
+            const a = assets[sym];
+            const r = document.createElement("div");
+            r.className = "ar" + (sym === selSym ? " sel" : "");
+            r.id = "ar_" + sym;
+            r.onclick = () => selAsset(sym);
+            r.innerHTML = `<div class="al"><div class="dot" style="background:${a.color}"></div><div><div class="an">${a.name}</div><div class="asy">${sym}</div></div></div><div class="ar2"><div class="ap" id="ap_${sym}" style="color:${a.color}">${fmt(a.price)}</div><div class="ac2 ${(a.ch24 || 0) >= 0 ? "u" : "d"}" id="ac_${sym}">${(a.ch24 || 0) >= 0 ? "+" : ""}${a.ch24 || 0}%</div></div>`;
+            sb.appendChild(r);
+          });
+        });
+      }
+      function updSB() {
+        Object.entries(assets).forEach(([sym, a]) => {
+          const pe = g("ap_" + sym),
+            ce = g("ac_" + sym);
+          if (pe) pe.textContent = fmt(a.price);
+          if (ce) {
+            ce.textContent = (a.ch24 >= 0 ? "+" : "") + a.ch24 + "%";
+            ce.className = "ac2 " + (a.ch24 >= 0 ? "u" : "d");
+          }
+        });
+      }
+      async function selAsset(sym) {
+        if (!assets[sym]) return;
+        selSym = sym;
+        document
+          .querySelectorAll(".ar")
+          .forEach((r) => r.classList.remove("sel"));
+        const el = g("ar_" + sym);
+        if (el) el.classList.add("sel");
+        updCH();
+        // 히스토리 없으면 즉시 로드
+        if (mChart && assets[sym].history.length < 3) {
+          const h = await GET(`${API}/assets/${sym}/history`);
+          if (h && Array.isArray(h) && h.length > 0)
+            assets[sym].history = h.map((x) => ({ t: x.t, p: x.p }));
+        }
+        rebuildMC();
+      }
+
+      /* ── TICKER ── */
+      function updTicker() {
+        const syms = [
+          "UPC",
+          "DWC",
+          "NANO",
+          "MIND",
+          "BNEX",
+          "AERO",
+          "MEDC",
+          "OMAX",
+          "SICO",
+        ];
+        let h = "";
+        for (let p = 0; p < 2; p++)
+          syms.forEach((s) => {
+            const a = assets[s];
+            if (!a) return;
+            const c = (a.ch24 || 0) >= 0 ? "u" : "d";
+            h += `<div class="ti">${s} <span class="v">${fmt(a.price)}</span> <span class="${c}">${(a.ch24 || 0) >= 0 ? "+" : ""}${a.ch24 || 0}%</span></div>`;
+          });
+        g("tkt").innerHTML = h;
+      }
+
+      /* ── CHARTS ── */
+      /* responsive:false + 캔버스 명시적 크기 → 레이아웃 시점과 무관하게 항상 동작 */
+      const CO = {
+        responsive: false,
+        maintainAspectRatio: false,
+        animation: { duration: 0 },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            mode: "index",
+            intersect: false,
+            callbacks: { label: (c) => fmt(c.parsed.y) + "원" },
+          },
+        },
+        scales: {
+          x: { display: false },
+          y: {
+            display: true,
+            grid: { color: "rgba(26,45,69,0.4)" },
+            ticks: {
+              color: "#4a6a8a",
+              font: { family: "Space Mono", size: 9 },
+              maxTicksLimit: 5,
+              callback: (v) => fmt(v),
+            },
+          },
+        },
+        elements: {
+          point: { radius: 0 },
+          line: { tension: 0.3, borderWidth: 2 },
+        },
+      };
+
+      /* hex → rgba */
+      function h2r(hex, a) {
+        const r = parseInt(hex.slice(1, 3), 16),
+          g2 = parseInt(hex.slice(3, 5), 16),
+          b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r},${g2},${b},${a})`;
+      }
+
+      function initCharts() {
+        /* 기존 차트 파괴 */
+        [mChart, muC, mdC].forEach((c) => {
+          try {
+            if (c) c.destroy();
+          } catch (e) {}
+        });
+        mChart = muC = mdC = null;
+
+        /* 캔버스 크기를 컨테이너에 맞게 동적 조정 */
+        function fitCanvas(id, fallbackW, h) {
+          const el = g(id);
+          if (!el) return;
+          const parent = el.parentNode;
+          const pad =
+            (parseInt(getComputedStyle(parent).paddingLeft) || 12) * 2;
+          const w =
+            parent.offsetWidth > 0 ? parent.offsetWidth - pad : fallbackW;
+          el.width = Math.max(w, 100);
+          el.height = h;
+        }
+        fitCanvas("mc", 800, 216);
+        fitCanvas("mu", 380, 88);
+        fitCanvas("md", 380, 88);
+
+        function ds(color) {
+          return {
+            data: [],
+            borderColor: color,
+            fill: true,
+            backgroundColor: h2r(color, 0.15),
+            borderWidth: 2,
+            pointRadius: 0,
+            tension: 0.3,
+          };
+        }
+
+        mChart = new Chart(g("mc").getContext("2d"), {
+          ...CO,
+          data: { labels: [], datasets: [ds("#00f5d4")] },
+        });
+        muC = new Chart(g("mu").getContext("2d"), {
+          ...CO,
+          data: { labels: [], datasets: [ds("#00f5d4")] },
+        });
+        mdC = new Chart(g("md").getContext("2d"), {
+          ...CO,
+          data: { labels: [], datasets: [ds("#f5a623")] },
+        });
+
+        console.log(
+          "[차트] 초기화 완료 mc:",
+          g("mc").width,
+          "x",
+          g("mc").height,
+        );
+      }
+      function rebuildMC() {
+        if (!mChart || !assets[selSym]) return;
+        const a = assets[selSym];
+        const h = (a.history || []).slice(-period);
+        if (!h.length) {
+          console.log("[차트] 히스토리 없음:", selSym);
+          return;
+        }
+        mChart.data.labels = h.map((x) =>
+          new Date(x.t).toLocaleTimeString("ko", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          }),
+        );
+        mChart.data.datasets[0].data = h.map((x) => x.p);
+        mChart.data.datasets[0].borderColor = a.color;
+        mChart.data.datasets[0].backgroundColor = h2r(a.color, 0.15);
+        mChart.update();
+        console.log("[차트] 그리기 완료:", selSym, h.length, "개");
+      }
+      function updMC() {
+        if (!mChart || !assets[selSym]) return;
+        const a = assets[selSym],
+          h = (a.history || []).slice(-period);
+        if (!h.length) return;
+        mChart.data.labels = h.map((x) =>
+          new Date(x.t).toLocaleTimeString("ko", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          }),
+        );
+        mChart.data.datasets[0].data = h.map((x) => x.p);
+        mChart.update("none"); /* 실시간: 애니메이션 없이 즉시 */
+      }
+      function updMinis() {
+        if (!muC) return;
+        const uh = (assets["UPC"]?.history || []).slice(-50);
+        if (uh.length) {
+          muC.data.labels = uh.map((_) => "");
+          muC.data.datasets[0].data = uh.map((x) => x.p);
+          muC.update("none");
+        }
+        const dh = (assets["DWC"]?.history || []).slice(-50);
+        if (dh.length) {
+          mdC.data.labels = dh.map((_) => "");
+          mdC.data.datasets[0].data = dh.map((x) => x.p);
+          mdC.update("none");
+        }
+      }
+      function updCH() {
+        const a = assets[selSym];
+        if (!a) return;
+        g("cname").textContent = `${a.name} (${selSym})`;
+        g("cprice").textContent = fmt(a.price) + "원";
+        g("cprice").style.color = a.color;
+        const e = g("cchg");
+        e.textContent = (a.ch24 >= 0 ? "+" : "") + a.ch24 + "%";
+        e.className = "cc " + (a.ch24 >= 0 ? "u" : "d");
+      }
+      function setPd(n, btn) {
+        period = n;
+        document
+          .querySelectorAll("#tChart .mt")
+          .forEach((b) => b.classList.remove("on"));
+        btn.classList.add("on");
+        rebuildMC();
+      }
+
+      /* ── TRADE ── */
+      function buildTSel() {
+        const sel = g("tasel");
+        sel.innerHTML = "";
+        SORD.forEach((sec) => {
+          const syms = Object.keys(assets).filter(
+            (s) => assets[s].sector === sec,
+          );
+          if (!syms.length) return;
+          const og = document.createElement("optgroup");
+          og.label = SECTS[sec] || sec;
+          syms.forEach((sym) => {
+            const o = document.createElement("option");
+            o.value = sym;
+            o.textContent = `${assets[sym].name} (${sym})`;
+            og.appendChild(o);
+          });
+          sel.appendChild(og);
+        });
+        trSym = selSym;
+        sel.value = selSym;
+        updTP();
+      }
+      function onAS() {
+        trSym = g("tasel").value;
+        updTP();
+        calcT();
+      }
+      function setAct(a) {
+        trAct = a;
+        g("tby").classList.toggle("on", a === "buy");
+        g("tsl").classList.toggle("on", a === "sell");
+        const b = g("texec");
+        if (a === "buy") {
+          b.textContent = "▲ 매수 실행 (KRW로 자산 구매)";
+          b.className = "bbuy";
+        } else {
+          b.textContent = "▼ 매도 실행 (자산 팔아 KRW 수령)";
+          b.className = "bsell";
+        }
+        g("tactL").textContent = a === "buy" ? "매수(구매)" : "매도(판매)";
+        g("tactL").style.color = a === "buy" ? "var(--gn)" : "var(--rd)";
+      }
+      function updTP() {
+        const a = assets[trSym];
+        if (!a) return;
+        g("tpr").value = fmt(a.price) + "원";
+        calcT();
+      }
+      function calcT() {
+        const q = parseFloat(g("tamt").value) || 0;
+        g("ttot").textContent =
+          fmtI(Math.round((assets[trSym]?.price || 0) * q)) + "원";
+      }
+      async function doTrade() {
+        const q = parseFloat(g("tamt").value);
+        if (!q || q <= 0) {
+          tMsg("수량을 입력하세요.", true);
+          return;
+        }
+        const r = await POST(`${API}/trade`, {
+          symbol: trSym,
+          action: trAct,
+          amount: q,
+        });
+        if (!r) {
+          tMsg("서버 오류", true);
+          return;
+        }
+        if (r.error) {
+          tMsg(r.error, true);
+          return;
+        }
+        tMsg(
+          `✅ ${trAct === "buy" ? "매수(구매)" : "매도(판매)"} 완료!`,
+          false,
+        );
+        me.bal = r.bal;
+        g("tamt").value = "";
+        calcT();
+      }
+      function tMsg(m, e) {
+        const el = g("tmsg");
+        el.textContent = m;
+        el.className = "tmsg" + (e ? " er" : "");
+        setTimeout(() => (el.textContent = ""), 3200);
+      }
+
+      /* ── BALANCE ── */
+      function updBal() {
+        if (!me?.bal) return;
+        let tot = me.bal.KRW || 0;
+        const rows = [
+          `<tr><td style="color:var(--ac)">KRW</td><td>원화</td><td>${fmtI(me.bal.KRW || 0)}</td><td>-</td><td style="color:var(--ac)">${fmtI(me.bal.KRW || 0)}원</td></tr>`,
+        ];
+        Object.entries(assets).forEach(([sym, a]) => {
+          const q = parseFloat(me.bal[sym] || 0);
+          if (q <= 0) return;
+          const v = Math.round(q * a.price);
+          tot += v;
+          rows.push(
+            `<tr><td style="color:${a.color}">${sym}</td><td>${a.name}</td><td>${q.toFixed(4)}</td><td>${fmt(a.price)}원</td><td style="color:${a.color}">${fmtI(v)}원</td></tr>`,
+          );
+        });
+        g("balb").innerHTML = rows.join("");
+        g("ptot").textContent = fmtI(tot) + "원";
+      }
+      async function loadTx() {
+        const d = await GET(`${API}/transactions`);
+        if (!d) return;
+        g("txb").innerHTML =
+          d.length === 0
+            ? '<tr><td colspan="6" style="color:var(--mu);padding:10px">거래 내역 없음</td></tr>'
+            : d
+                .map(
+                  (tx) =>
+                    `<tr><td>${new Date(tx.ts).toLocaleTimeString("ko")}</td><td style="color:${assets[tx.sym]?.color || "var(--tx)"}">${tx.sym}</td><td style="color:${tx.action === "buy" ? "var(--gn)" : "var(--rd)"}">${tx.action === "buy" ? "▲매수" : "▼매도"}</td><td>${tx.qty}</td><td>${fmt(tx.price)}원</td><td>${fmtI(tx.total)}원</td></tr>`,
+                )
+                .join("");
+      }
+
+      /* ── TAB SWITCHING ── */
+      function mTab(t, btn) {
+        ["Chart", "Trade", "Bal", "Tx"].forEach(
+          (x) =>
+            (g("t" + x).style.display = x.toLowerCase() === t ? "" : "none"),
+        );
+        document
+          .querySelectorAll(".mts .mt")
+          .forEach((b) => b.classList.remove("on"));
+        btn.classList.add("on");
+        if (t === "bal") {
+          GET(`${API}/me`).then((d) => {
+            if (d && !d.error) {
+              me = d;
+              updBal();
+            }
+          });
+        }
+        if (t === "tx") loadTx();
+      }
+
+      /* ── NEWS (4개씩 배치로) ── */
+      function prepBatch(batch) {
+        if (!batch) return;
+        const items = batch.batch || [];
+        if (!items.length) return;
+        const feed = g("nf");
+        const wrap = document.createElement("div");
+        wrap.className = "nbatch";
+        const ts = items[0]?.ts || batch.ts || Date.now();
+        wrap.innerHTML = `<div class="nbtime">📰 ${new Date(ts).toLocaleTimeString("ko")} 뉴스 ${items.length}건 발표</div>`;
+        items.forEach((n) => {
+          const tags = (n.a || [])
+            .map((sym, i) => {
+              const imp = n.imp[i];
+              const c = imp >= 0 ? "u" : "d";
+              return `<span class="ntg ${c}">${sym} ${imp >= 0 ? "+" : ""}${(imp * 100).toFixed(1)}%</span>`;
+            })
+            .join("");
+          const ni = document.createElement("div");
+          ni.className = "ni";
+          ni.innerHTML = `<div class="nh">${n.i} ${n.h}</div><div class="ntgs">${tags}</div>`;
+          wrap.appendChild(ni);
+        });
+        feed.prepend(wrap);
+        if (feed.children.length > 8) feed.lastChild.remove();
+      }
+
+      /* ── TRADE FEED ── */
+      function prepFeed(tx) {
+        const f = g("tf2");
+        const c = tx.action === "buy" ? "by" : "sl";
+        const d = document.createElement("div");
+        d.className = "fr";
+        d.innerHTML = `<div><div class="fw">${tx.username}</div><div class="fd ${c}">${tx.action === "buy" ? "▲매수" : "▼매도"} ${tx.qty} ${tx.sym}</div></div><div style="text-align:right"><div style="font-size:10px;font-family:'Space Mono',monospace">${fmtI(tx.total)}원</div><div style="font-size:9px;color:var(--mu)">${new Date(tx.ts).toLocaleTimeString("ko")}</div></div>`;
+        f.prepend(d);
+        if (f.children.length > 15) f.lastChild.remove();
+      }
+
+      /* ── ANNOUNCE ── */
+      function showAnn(m) {
+        const e = g("ann");
+        e.textContent = "📢 " + m;
+        e.classList.add("sh");
+        setTimeout(() => e.classList.remove("sh"), 6000);
+      }
+
+      /* ── ADMIN ── */
+      function buildAdmSel() {
+        const gs = g("aGS");
+        gs.innerHTML = '<option value="KRW">KRW (원화)</option>';
+        const ps = g("aPS");
+        ps.innerHTML = "";
+        Object.entries(assets).forEach(([s, a]) => {
+          const o1 = document.createElement("option");
+          o1.value = s;
+          o1.textContent = `${a.name} (${s})`;
+          gs.appendChild(o1);
+          const o2 = document.createElement("option");
+          o2.value = s;
+          o2.textContent = `${a.name} (${s})`;
+          ps.appendChild(o2);
+        });
+      }
+      async function openAdm() {
+        g("adm").classList.add("op");
+        await loadAdmU();
+      }
+      function closeAdm() {
+        g("adm").classList.remove("op");
+      }
+
+      async function loadAdmU() {
+        const d = await GET(`${API}/admin/users`);
+        if (!d || d.error) return;
+        g("utb").innerHTML = d
+          .map(
+            (u) =>
+              `<tr><td>${u.studentId}</td><td>${u.username}${u.isAdmin ? " 👑" : ""}</td><td style="color:var(--ac)">${fmtI(u.bal?.KRW || 0)}</td><td style="color:#00f5d4">${parseFloat(u.bal?.UPC || 0).toFixed(2)}</td><td style="color:#f5a623">${parseFloat(u.bal?.DWC || 0).toFixed(2)}</td><td style="color:var(--mu)">${new Date(u.createdAt).toLocaleDateString("ko")}</td></tr>`,
+          )
+          .join("");
+        const su = g("aSU");
+        su.innerHTML = "";
+        d.forEach((u) => {
+          const o = document.createElement("option");
+          o.value = u.username;
+          o.textContent = u.username + " (" + u.studentId + ")";
+          su.appendChild(o);
+        });
+        // 전체 거래내역
+        const tx = await GET(`${API}/admin/transactions`);
+        if (tx)
+          g("atxb").innerHTML = tx
+            .slice(0, 30)
+            .map(
+              (t) =>
+                `<tr><td>${new Date(t.ts).toLocaleTimeString("ko")}</td><td>${t.username}</td><td style="color:${assets[t.sym]?.color || "var(--tx)"}">${t.sym}</td><td style="color:${t.action === "buy" ? "var(--gn)" : "var(--rd)"}">${t.action === "buy" ? "▲매수" : "▼매도"}</td><td>${t.qty}</td><td>${fmtI(t.total)}원</td></tr>`,
+            )
+            .join("");
+      }
+
+      async function loadBE() {
+        const un = g("aSU").value;
+        const d = await GET(`${API}/admin/users`);
+        if (!d) return;
+        const u = d.find((x) => x.username === un);
+        if (!u) return;
+        g("ben").textContent = u.username + " (학번: " + u.studentId + ")";
+        const grid = g("beg");
+        grid.innerHTML = "";
+        const all = [
+          { s: "KRW", n: "KRW 원화", v: u.bal?.KRW || 0 },
+          ...Object.entries(assets).map(([s, a]) => ({
+            s,
+            n: `${a.name}(${s})`,
+            v: u.bal?.[s] || 0,
+          })),
+        ];
+        all.forEach(({ s, n, v }) => {
+          const div = document.createElement("div");
+          div.className = "ber";
+          div.innerHTML = `<label title="${n}">${s}</label><input id="be_${s}" type="number" value="${v}" min="0" step="0.001"/>`;
+          grid.appendChild(div);
+        });
+        g("be").style.display = "";
+      }
+      async function saveBE() {
+        const un = g("aSU").value;
+        const el = g("aBM");
+        let ok = true;
+        const all = ["KRW", ...Object.keys(assets)];
+        for (const s of all) {
+          const inp = g("be_" + s);
+          if (!inp) continue;
+          const r = await POST(`${API}/admin/setbal`, {
+            targetUsername: un,
+            asset: s,
+            value: parseFloat(inp.value),
+          });
+          if (r?.error) {
+            el.textContent = r.error;
+            el.className = "am er";
+            ok = false;
+            break;
+          }
+        }
+        if (ok) {
+          el.textContent = "✅ 전체 저장 완료";
+          el.className = "am";
+        }
+        await loadAdmU();
+      }
+      async function aGive() {
+        const r = await POST(`${API}/admin/give`, {
+          targetUsername: g("aGU").value,
+          asset: g("aGS").value,
+          amount: parseFloat(g("aGA").value),
+        });
+        const e = g("aGM");
+        e.textContent = r?.message || r?.error || "오류";
+        e.className = "am" + (r?.error ? " er" : "");
+        await loadAdmU();
+      }
+      async function aSetP() {
+        const r = await POST(`${API}/admin/setprice`, {
+          symbol: g("aPS").value,
+          price: parseFloat(g("aPV").value),
+        });
+        const e = g("aPM");
+        e.textContent = r?.message || r?.error || "오류";
+        e.className = "am" + (r?.error ? " er" : "");
+      }
+      async function aAnn() {
+        await POST(`${API}/admin/announce`, { message: g("aMsg").value });
+        g("aMsg").value = "";
+      }
+      async function aFireNews() {
+        const r = await POST(`${API}/admin/firenews`, {});
+        const e = g("aNM");
+        e.textContent = r?.message || "완료";
+        e.className = "am";
+      }
+    </script>
+  </body>
+</html>
