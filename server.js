@@ -589,6 +589,27 @@ app.get('/api/assets/:sym/history',(req,res)=>{
 });
 
 /* 뉴스 */
+
+/* ── 공개 랭킹 API (인증 불필요) ── */
+app.get('/api/ranking',(req,res)=>{
+  const list=[];
+  for(const u of USERS.values()){
+    let total=Math.round(u.bal.KRW||0);
+    Object.entries(ASSETS).forEach(([sym,a])=>{
+      const qty=parseFloat(u.bal[sym]||0);
+      if(qty>0) total+=Math.round(qty*a.price);
+    });
+    list.push({
+      username: u.username,
+      studentId: String(u.studentId).replace(/(\d{2})\d+(\d{2})/,'$1**$2'),
+      isAdmin: u.isAdmin,
+      total
+    });
+  }
+  list.sort((a,b)=>b.total-a.total);
+  res.json(list);
+});
+
 app.get('/api/news',(req,res)=>res.json(NHIST.slice(0,10)));
 
 /* ───────────────────────────────────────────────────────
