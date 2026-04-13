@@ -180,6 +180,26 @@ body::before{content:'';position:fixed;inset:0;z-index:0;background-image:linear
 .ber{display:flex;align-items:center;gap:5px;background:var(--pn);border:1px solid var(--bd);border-radius:4px;padding:5px 7px}
 .ber label{font-size:9px;font-family:'Space Mono',monospace;color:var(--mu);width:36px;flex-shrink:0}
 .ber input{flex:1;background:transparent;border:none;color:var(--tx);font-size:11px;font-family:'Space Mono',monospace;outline:none;min-width:0}
+
+/* ── 랭킹 탭 ── */
+.rank-box{background:var(--pn);border:1px solid var(--bd);border-radius:var(--rr);padding:16px}
+.rank-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.rank-title{font-size:13px;font-weight:700}
+.rank-upd{font-size:9px;color:var(--mu);font-family:'Space Mono',monospace}
+.rank-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:6px;margin-bottom:5px;border:1px solid var(--bd);background:var(--pn)}
+.rank-row.me{border-color:#00f5d4;background:rgba(0,245,212,0.05)}
+.rank-num{font-family:'Space Mono',monospace;font-size:15px;font-weight:700;width:28px;text-align:center;flex-shrink:0}
+.rank-num.gold{color:#f5c842}.rank-num.silver{color:#aab8c2}.rank-num.bronze{color:#cd7f32}.rank-num.n{color:var(--mu)}
+.rank-medal{font-size:18px;width:26px;text-align:center;flex-shrink:0}
+.rank-info{flex:1;min-width:0}
+.rank-name{font-size:12px;font-weight:700}
+.rank-sid{font-size:10px;color:var(--mu);font-family:'Space Mono',monospace}
+.rank-bar-wrap{width:100%;height:3px;background:var(--bd);border-radius:2px;margin-top:5px}
+.rank-bar{height:100%;border-radius:2px;background:linear-gradient(90deg,#00f5d4,#f5a623)}
+.rank-val{text-align:right;flex-shrink:0}
+.rank-krw{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;color:var(--ac)}
+.rank-empty{color:var(--mu);font-size:12px;text-align:center;padding:24px}
+.rank-me-tag{font-size:9px;background:rgba(0,245,212,0.2);color:#00f5d4;border:1px solid rgba(0,245,212,0.4);border-radius:3px;padding:1px 5px;font-family:'Space Mono',monospace;margin-left:5px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -236,6 +256,7 @@ body::before{content:'';position:fixed;inset:0;z-index:0;background-image:linear
         <button class="mt" onclick="mTab('trade',this)">💱 매수/매도</button>
         <button class="mt" onclick="mTab('bal',this)">💼 잔고</button>
         <button class="mt" onclick="mTab('tx',this)">📋 거래내역</button>
+        <button class="mt" onclick="mTab('rank',this)">🏆 랭킹</button>
       </div>
 
       <!-- 차트 -->
@@ -307,6 +328,17 @@ body::before{content:'';position:fixed;inset:0;z-index:0;background-image:linear
             <thead><tr><th>시간</th><th>자산</th><th>구분</th><th>수량</th><th>단가</th><th>금액</th></tr></thead>
             <tbody id="txb"></tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- 랭킹 -->
+      <div id="tRank" style="display:none">
+        <div class="rank-box">
+          <div class="rank-hdr">
+            <div class="rank-title">🏆 전체 자산 랭킹 <span style="font-size:10px;color:var(--mu);font-weight:400">(KRW 환산 총액)</span></div>
+            <div class="rank-upd" id="rankUpd">—</div>
+          </div>
+          <div id="rankList"><div class="rank-empty">🏆 버튼을 클릭하면 랭킹이 로드됩니다.</div></div>
         </div>
       </div>
     </div>
@@ -747,7 +779,7 @@ async function loadTx(){
 
 /* ─── 탭 전환 ─── */
 function mTab(t,btn){
-  ['Chart','Trade','Bal','Tx'].forEach(x=>{const el=g('t'+x);if(el)el.style.display=x.toLowerCase()===t?'':'none';});
+  ['Chart','Trade','Bal','Tx','Rank'].forEach(x=>{const el=g('t'+x);if(el)el.style.display=x.toLowerCase()===t?'':'none';});
   document.querySelectorAll('.mts .mt').forEach(b=>b.classList.remove('on')); btn.classList.add('on');
   if(t==='chart'){
     /* 차트 탭으로 돌아올 때 resize 후 재시도 */
@@ -755,6 +787,51 @@ function mTab(t,btn){
   }
   if(t==='bal'){GET(`${API}/me`).then(d=>{if(d&&!d.error){me=d;updBal();}});}
   if(t==='tx') loadTx();
+  if(t==='rank') loadRanking();
+}
+
+/* ─── 랭킹 ─── */
+async function loadRanking(){
+  const el=g('rankList'); if(!el)return;
+  el.innerHTML='<div class="rank-empty">계산 중...</div>';
+  // 관리자: admin/users로 실시간 계산, 일반: /api/ranking 사용
+  let ranked=[];
+  if(me&&me.isAdmin){
+    const d=await GET(`${API}/admin/users`);
+    if(!d||!Array.isArray(d)){el.innerHTML='<div class="rank-empty">로드 실패</div>';return;}
+    ranked=d.map(u=>{
+      let tot=Math.round(u.bal&&u.bal.KRW?u.bal.KRW:0);
+      Object.entries(assets).forEach(([sym,a])=>{
+        const qty=parseFloat(u.bal&&u.bal[sym]?u.bal[sym]:0);
+        if(qty>0)tot+=Math.round(qty*a.price);
+      });
+      return{username:u.username,studentId:String(u.studentId).replace(/(\d{2})\d+(\d{2})/,'$1**$2'),isAdmin:u.isAdmin,total:tot};
+    }).sort((a,b)=>b.total-a.total);
+  } else {
+    const d=await GET(`${API}/ranking`);
+    if(!d||!Array.isArray(d)){el.innerHTML='<div class="rank-empty">랭킹 로드 실패</div>';return;}
+    ranked=d;
+  }
+  if(!ranked.length){el.innerHTML='<div class="rank-empty">등록된 유저가 없습니다.</div>';return;}
+  const top=ranked[0].total||1;
+  const medals=['🥇','🥈','🥉'];
+  const nCls=['gold','silver','bronze'];
+  const myU=me&&me.username?me.username:'';
+  el.innerHTML=ranked.map((u,i)=>{
+    const isMe=u.username===myU;
+    const barPct=Math.max(2,Math.round(u.total/top*100));
+    return `<div class="rank-row${isMe?' me':''}">
+      <div class="rank-num ${nCls[i]||'n'}">${i+1}</div>
+      <div class="rank-medal">${medals[i]||''}</div>
+      <div class="rank-info">
+        <div class="rank-name">${u.username}${u.isAdmin?' 👑':''}${isMe?'<span class="rank-me-tag">나</span>':''}</div>
+        <div class="rank-sid">학번 ${u.studentId}</div>
+        <div class="rank-bar-wrap"><div class="rank-bar" style="width:${barPct}%"></div></div>
+      </div>
+      <div class="rank-val"><div class="rank-krw">${fmtI(u.total)}원</div></div>
+    </div>`;
+  }).join('');
+  if(g('rankUpd'))g('rankUpd').textContent='업데이트: '+new Date().toLocaleTimeString('ko');
 }
 
 /* ─── 뉴스 ─── */
