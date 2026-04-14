@@ -4,21 +4,25 @@
  * 매수(buy)=KRW지불→자산취득 / 매도(sell)=자산반납→KRW수령
  */
 'use strict';
-const express   = require('express');
-const http      = require('http');
-const WebSocket = require('ws');
-const jwt       = require('jsonwebtoken');
-const bcrypt    = require('bcryptjs');
-const cors      = require('cors');
-const fs        = require('fs');
-const path      = require('path');
-const { v4: uuid } = require('uuid');
+require('dotenv').config();
+const express        = require('express');
+const http           = require('http');
+const WebSocket      = require('ws');
+const jwt            = require('jsonwebtoken');
+const bcrypt         = require('bcryptjs');
+const cors           = require('cors');
+const fs             = require('fs');
+const path           = require('path');
+const { v4: uuid }   = require('uuid');
+const session        = require('express-session');
+const passport       = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
 
 const app    = express();
 const server = http.createServer(app);
 const wss    = new WebSocket.Server({ server });
 
-const SECRET   = 'ccx_secret_2025';
+const SECRET   = process.env.JWT_SECRET || 'ccx_secret_2025';
 const ADMIN_ID = '10933';
 const PORT     = process.env.PORT || 3000;
 const PUB      = fs.existsSync(path.join(__dirname,'public'))
@@ -27,6 +31,58 @@ const PUB      = fs.existsSync(path.join(__dirname,'public'))
 app.use(cors());
 app.use(express.json());
 app.use(express.static(PUB));
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'ccx_session_secret_2025',
+  resave: false,
+  saveUninitialized: false,
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+
+/* ═══════════════════════════════════════════════════════
+   Google OAuth 전략
+═══════════════════════════════════════════════════════ */
+passport.use(new GoogleStrategy({
+  clientID:     process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  callbackURL:  process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/api/auth/google/callback',
+}, (accessToken, refreshToken, profile, done) => {
+  // Google 계정 이메일을 username으로 사용
+  const googleId = profile.id;
+  const email    = profile.emails?.[0]?.value || '';
+  const name     = profile.displayName || email.split('@')[0];
+  // googleId로 기존 유저 탐색
+  let user = [...USERS.values()].find(u => u.googleId === googleId);
+  if (!user) {
+    // 이메일이 같은 일반 계정이 있으면 연동, 없으면 신규 생성
+    user = [...USERS.values()].find(u => u.email === email);
+    if (user) {
+      user.googleId = googleId;
+    } else {
+      const username = `google_${googleId}`;
+      user = {
+        id: uuid(),
+        username,
+        displayName: name,
+        email,
+        googleId,
+        pw: null,
+        isAdmin: false,
+        bal: mkBal(false),
+        createdAt: Date.now(),
+      };
+      USERS.set(username, user);
+    }
+    saveUsers();
+  }
+  return done(null, user);
+}));
+
+passport.serializeUser((user, done) => done(null, user.username));
+passport.deserializeUser((username, done) => {
+  const user = USERS.get(username);
+  done(user ? null : new Error('유저 없음'), user || null);
+});
 
 /* ═══════════════════════════════════════════════════════
    자산 22개
@@ -58,7 +114,11 @@ const ASSETS = {
 // price / momentum / history 초기화
 Object.keys(ASSETS).forEach(k=>{
   const a=ASSETS[k];
+  a.initBase=a.base; // 초기 기준가 고정 (절대 변하지 않음)
   a.price=a.base; a.prev=a.base; a.mom=0; a.ch24=0; a.hist=[];
+  // 가격 범위: initBase의 5% ~ 500% 범위로 하드캡
+  a.minPrice = a.initBase * 0.05;
+  a.maxPrice = a.initBase * 5.0;
 });
 
 /* ═══════════════════════════════════════════════════════
@@ -415,13 +475,41 @@ USERS.set('admin',{
   isAdmin:true, bal:mkBal(true), createdAt:Date.now()
 });
 
+
+/* ─── 공지 게시판 (영속) ─── */
+const NOTICES = []; // [{id, title, content, createdAt, pinned}]
+const NOTICE_FILE = path.join(__dirname,'notices_db.json');
+
+function loadNotices(){
+  try{
+    if(fs.existsSync(NOTICE_FILE)){
+      const data=JSON.parse(fs.readFileSync(NOTICE_FILE,'utf-8'));
+      NOTICES.push(...data);
+      console.log(`✅ 공지 ${data.length}개 로드`);
+    }
+  }catch(e){ console.error('공지 로드 실패:',e.message); }
+}
+function saveNotices(){
+  try{ fs.writeFileSync(NOTICE_FILE,JSON.stringify(NOTICES,null,2)); }
+  catch(e){ console.error('공지 저장 실패:',e.message); }
+}
+loadNotices();
+
+/* ─── 유저 DB 로드 ─── */
+loadUsers();
+if(!USERS.has('admin')){
+  USERS.set('admin',{id:uuid(),username:'admin',pw:bcrypt.hashSync('admin1234',10),isAdmin:true,bal:mkBal(true),createdAt:Date.now()});
+  saveUsers();
+  console.log('✅ 관리자 계정 생성 (admin/admin1234)');
+}
+
 /* ─── 히스토리 시드 ─── */
 (()=>{
   const now=Date.now();
   Object.values(ASSETS).forEach(a=>{
     let p=a.base;
     for(let i=120;i>=0;i--){
-      p=Math.max(1,p*(1+(Math.random()-0.495)*a.v));
+      p=Math.max(a.minPrice||1,Math.min(a.maxPrice||p*100,p*(1+(Math.random()-0.495)*a.v)));
       a.hist.push({t:now-i*2000,p:+p.toFixed(2)});
     }
     a.price=a.hist.at(-1).p; a.prev=a.hist.at(-2).p;
@@ -433,32 +521,68 @@ USERS.set('admin',{
 ═══════════════════════════════════════════════════════ */
 let tick=0, evCD=0;
 
+function clampPrice(a, newPrice){
+  // 하드캡: initBase의 5%~500% 범위 내
+  return Math.max(a.minPrice, Math.min(a.maxPrice, newPrice));
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   기준금리 시스템
+   - rate: 연이율 % (ex: 3.5 = 3.5%)
+   - 금리가 높을수록 주가 하락 압력, 낮을수록 상승 여력
+   - 기준금리는 전체 시장에, 종목금리는 개별 종목에 적용
+═══════════════════════════════════════════════════════ */
+let MARKET_RATE = 3.5; // 기준금리 (%)
+const ASSET_RATES = {}; // 종목별 추가 금리
+Object.keys(ASSETS).forEach(sym => { ASSET_RATES[sym] = 0; }); // 초기값 0%
+
+function getRateEffect(sym){
+  const total = MARKET_RATE + (ASSET_RATES[sym]||0);
+  // 금리 1% = 틱당 -0.00008 압력 (연환산 약 -1%)
+  return -(total / 100) * 0.00008;
+}
+
+function meanRevert(a){
+  // 강화된 비선형 평균회귀: 기준가에서 멀수록 더 강하게 당김
+  const ratio = a.price / a.initBase;
+  let rv = 0;
+  if(ratio > 2.0)       rv = -(ratio - 2.0) * 0.025;  // 200% 초과 시 강한 하락력
+  else if(ratio > 1.5)  rv = -(ratio - 1.5) * 0.015;  // 150% 초과
+  else if(ratio < 0.3)  rv =  (0.3 - ratio) * 0.030;  // 30% 미만 시 강한 상승력
+  else if(ratio < 0.5)  rv =  (0.5 - ratio) * 0.015;  // 50% 미만
+  else                   rv =  (a.initBase - a.price) / a.initBase * 0.004; // 일반 회귀
+  return rv;
+}
+
 function tickPrices(){
   tick++;
   const now=Date.now();
 
   // UPC ↔ DWC 역상관
   const U=ASSETS.UPC, D=ASSETS.DWC;
-  U.mom*=0.88; D.mom*=0.88;
-  if(evCD<=0 && Math.random()<0.02){
+  U.mom*=0.82; D.mom*=0.82; // 감쇠 강화
+  if(evCD<=0 && Math.random()<0.015){ // 빈도 감소
     const tgt=Math.random()<0.5?U:D;
-    tgt.mom+=(Math.random()<0.5?1:-1)*(0.05+Math.random()*0.10);
-    evCD=15;
+    tgt.mom+=(Math.random()<0.5?1:-1)*(0.03+Math.random()*0.06); // 충격 감소
+    evCD=20;
   }
   if(evCD>0)evCD--;
 
-  const uc=(Math.random()-0.495)*U.v + U.mom - D.mom*0.30 + (U.base-U.price)/U.base*0.003;
-  const dc=(Math.random()-0.495)*D.v + D.mom - U.mom*0.30 + (D.base-D.price)/D.base*0.003;
-  U.prev=U.price; U.price=Math.max(1,+(U.price*(1+uc)).toFixed(2));
-  D.prev=D.price; D.price=Math.max(1,+(D.price*(1+dc)).toFixed(2));
+  const uc=(Math.random()-0.495)*U.v + U.mom - D.mom*0.20 + meanRevert(U) + getRateEffect('UPC');
+  const dc=(Math.random()-0.495)*D.v + D.mom - U.mom*0.20 + meanRevert(D) + getRateEffect('DWC');
+  U.prev=U.price; U.price=clampPrice(U, +(U.price*(1+Math.max(-0.08,Math.min(0.08,uc)))).toFixed(2));
+  D.prev=D.price; D.price=clampPrice(D, +(D.price*(1+Math.max(-0.08,Math.min(0.08,dc)))).toFixed(2));
 
   // 주식들
-  Object.values(ASSETS).forEach(a=>{
+  Object.entries(ASSETS).forEach(([sym,a])=>{
     if(a.t!=='stock')return;
-    a.mom*=0.90;
-    const rv=(a.base-a.price)/a.base*0.002;
-    const ch=(Math.random()-0.495)*a.v + a.mom + rv;
-    a.prev=a.price; a.price=Math.max(1,+(a.price*(1+ch)).toFixed(2));
+    a.mom*=0.85; // 감쇠 강화
+    const rv=meanRevert(a);
+    const rateEff=getRateEffect(sym);
+    const ch=(Math.random()-0.495)*a.v + a.mom + rv + rateEff;
+    // 틱당 최대 변동폭 제한: ±5%
+    a.prev=a.price; a.price=clampPrice(a, +(a.price*(1+Math.max(-0.05,Math.min(0.05,ch)))).toFixed(2));
   });
 
   // history & ch24
@@ -495,8 +619,8 @@ function fireNews(){
     const actualImpact=tpl.r.map(([lo,hi])=>+(rnd(lo,hi)).toFixed(4));
     tpl.a.forEach((sym,i)=>{
       if(!ASSETS[sym])return;
-      ASSETS[sym].mom += actualImpact[i];
-      ASSETS[sym].base = Math.max(1, ASSETS[sym].base*(1+actualImpact[i]*0.3));
+      // base는 절대 변경 안 함 — mom에만 영향 (폭주 방지)
+      ASSETS[sym].mom += actualImpact[i] * 0.5; // 임팩트 50% 감소
     });
     const item={id:uuid(),h:tpl.h,i:tpl.i,a:tpl.a,imp:actualImpact,ts:Date.now()};
     console.log(`[뉴스] ${tpl.i} ${tpl.h.slice(0,40)}... | ${tpl.a.map((s,i)=>s+':'+(actualImpact[i]*100).toFixed(1)+'%').join(', ')}`);
@@ -522,7 +646,7 @@ wss.on('connection',ws=>{
   const ia={};
   Object.entries(ASSETS).forEach(([s,a])=>{
     ia[s]={name:a.n,type:a.t,sector:a.s,color:a.color,price:a.price,ch24:a.ch24,prev:a.prev,
-           history:a.hist.slice(-100).map(h=>({t:h.t,p:h.p}))};
+           history:a.hist.slice(-400).map(h=>({t:h.t,p:h.p}))};
   });
   ws.send(JSON.stringify({type:'INIT',data:{assets:ia,news:NHIST.slice(0,5)}}));
   ws.on('error',console.error);
@@ -545,31 +669,58 @@ function adm(req,res,next){ auth(req,res,()=>{ if(!req.user.isAdmin)return res.s
 
 /* 회원가입 */
 app.post('/api/register',async(req,res)=>{
-  const {studentId,username,password}=req.body;
-  if(!studentId||!username||!password)return res.status(400).json({error:'모든 항목을 입력하세요.'});
+  const {username,password,displayName}=req.body;
+  if(!username||!password)return res.status(400).json({error:'아이디와 비밀번호를 입력하세요.'});
+  if(username.length<2)return res.status(400).json({error:'아이디는 2자 이상이어야 합니다.'});
+  if(password.length<4)return res.status(400).json({error:'비밀번호는 4자 이상이어야 합니다.'});
   if(USERS.has(username))return res.status(400).json({error:'이미 사용 중인 아이디입니다.'});
-  for(const u of USERS.values())if(u.studentId===studentId)return res.status(400).json({error:'이미 등록된 학번입니다.'});
-  const isAdmin=studentId===ADMIN_ID;
-  USERS.set(username,{id:uuid(),studentId,username,pw:bcrypt.hashSync(password,10),isAdmin,bal:mkBal(isAdmin),createdAt:Date.now()});
+  const isAdmin=(username==='admin');
+  const dn=(displayName||'').trim()||username;
+  USERS.set(username,{id:uuid(),username,displayName:dn,pw:bcrypt.hashSync(password,10),isAdmin,bal:mkBal(isAdmin),createdAt:Date.now()});
+  saveUsers();
   res.json({message:'가입 완료! 업핏코인 100개 + 다윗코인 100개 + 1,000,000원 지급!'});
 });
 
 /* 로그인 */
 app.post('/api/login',(req,res)=>{
-  const {studentId,username,password}=req.body;
-  if(!studentId||!username||!password)return res.status(400).json({error:'모든 항목을 입력하세요.'});
+  const {username,password}=req.body;
+  if(!username||!password)return res.status(400).json({error:'아이디와 비밀번호를 입력하세요.'});
   const u=USERS.get(username);
-  if(!u||u.studentId!==studentId)return res.status(401).json({error:'학번 또는 아이디가 올바르지 않습니다.'});
+  if(!u)return res.status(401).json({error:'존재하지 않는 아이디입니다.'});
   if(!bcrypt.compareSync(password,u.pw))return res.status(401).json({error:'비밀번호가 올바르지 않습니다.'});
-  const token=jwt.sign({id:u.id,username:u.username,studentId:u.studentId,isAdmin:u.isAdmin},SECRET,{expiresIn:'8h'});
-  res.json({token,user:{username:u.username,studentId:u.studentId,isAdmin:u.isAdmin,bal:u.bal}});
+  const token=jwt.sign({id:u.id,username:u.username,isAdmin:u.isAdmin},SECRET,{expiresIn:'8h'});
+  res.json({token,user:{username:u.username,isAdmin:u.isAdmin,bal:u.bal}});
 });
 
 /* 내 정보 */
 app.get('/api/me',auth,(req,res)=>{
   const u=USERS.get(req.user.username);
   if(!u)return res.status(404).json({error:'유저 없음'});
-  res.json({username:u.username,studentId:u.studentId,isAdmin:u.isAdmin,bal:u.bal});
+  res.json({username:u.username,displayName:u.displayName||u.username,isAdmin:u.isAdmin,bal:u.bal,googleId:!!u.googleId});
+});
+
+/* 표시 이름 변경 */
+app.post('/api/me/displayname',auth,(req,res)=>{
+  const u=USERS.get(req.user.username);
+  if(!u)return res.status(404).json({error:'유저 없음'});
+  const dn=(req.body.displayName||'').trim();
+  if(!dn||dn.length<1)return res.status(400).json({error:'이름을 입력하세요.'});
+  if(dn.length>20)return res.status(400).json({error:'이름은 20자 이내로 입력하세요.'});
+  u.displayName=dn; saveUsers();
+  res.json({displayName:dn});
+});
+
+/* 비밀번호 변경 */
+app.post('/api/me/password',auth,async(req,res)=>{
+  const u=USERS.get(req.user.username);
+  if(!u)return res.status(404).json({error:'유저 없음'});
+  if(u.googleId&&!u.pw)return res.status(400).json({error:'Google 계정은 비밀번호를 변경할 수 없습니다.'});
+  const {current,newPassword}=req.body;
+  if(!current||!newPassword)return res.status(400).json({error:'현재 비밀번호와 새 비밀번호를 입력하세요.'});
+  if(!bcrypt.compareSync(current,u.pw))return res.status(401).json({error:'현재 비밀번호가 올바르지 않습니다.'});
+  if(newPassword.length<4)return res.status(400).json({error:'새 비밀번호는 4자 이상이어야 합니다.'});
+  u.pw=bcrypt.hashSync(newPassword,10); saveUsers();
+  res.json({message:'비밀번호가 변경됐습니다.'});
 });
 
 /* 자산 목록 */
@@ -585,30 +736,105 @@ app.get('/api/assets',(req,res)=>{
 app.get('/api/assets/:sym/history',(req,res)=>{
   const a=ASSETS[req.params.sym.toUpperCase()];
   if(!a)return res.status(404).json({error:'자산 없음'});
-  res.json(a.hist.slice(-100).map(h=>({t:h.t,p:h.p})));
+  res.json(a.hist.slice(-400).map(h=>({t:h.t,p:h.p})));
 });
 
 /* 뉴스 */
 
-/* ── 공개 랭킹 API (인증 불필요) ── */
+/* ── 기준금리 조회 ── */
+app.get('/api/rates',(req,res)=>{
+  res.json({marketRate: MARKET_RATE, assetRates: ASSET_RATES});
+});
+
+/* ── 시장 기준금리 설정 (관리자) ── */
+app.post('/api/admin/setmarketrate',adm,(req,res)=>{
+  const {rate}=req.body;
+  const r=parseFloat(rate);
+  if(isNaN(r)||r<0||r>50)return res.status(400).json({error:'금리는 0~50% 사이로 입력하세요.'});
+  const old=MARKET_RATE; MARKET_RATE=r;
+  const msg=`📊 [기준금리 변경] 시장 기준금리: ${old}% → ${r}%`;
+  broadcast({type:'ANNOUNCE',data:{message:msg,ts:Date.now()}});
+  // 공지에도 자동 등록
+  const notice={id:uuid(),title:'[시스템] 기준금리 변경',content:msg,createdAt:Date.now(),system:true};
+  NOTICES.unshift(notice); if(NOTICES.length>100)NOTICES.pop(); saveNotices();
+  broadcast({type:'NOTICE_NEW',data:notice});
+  res.json({message:`기준금리 ${old}% → ${r}% 변경 완료`});
+});
+
+/* ── 종목별 금리 설정 (관리자) ── */
+app.post('/api/admin/setassetrate',adm,(req,res)=>{
+  const {symbol,rate}=req.body;
+  const sym=symbol?.toUpperCase();
+  if(!ASSETS[sym])return res.status(404).json({error:'자산 없음'});
+  const r=parseFloat(rate);
+  if(isNaN(r)||r<-20||r>50)return res.status(400).json({error:'금리는 -20~50% 사이로 입력하세요.'});
+  const old=ASSET_RATES[sym]||0; ASSET_RATES[sym]=r;
+  const msg=`📊 [금리 변경] ${ASSETS[sym].n}(${sym}) 추가금리: ${old}% → ${r}%`;
+  broadcast({type:'ANNOUNCE',data:{message:msg,ts:Date.now()}});
+  const notice={id:uuid(),title:`[금리] ${ASSETS[sym].n} 금리 변경`,content:msg,createdAt:Date.now(),system:true};
+  NOTICES.unshift(notice); if(NOTICES.length>100)NOTICES.pop(); saveNotices();
+  broadcast({type:'NOTICE_NEW',data:notice});
+  res.json({message:`${sym} 추가금리 ${old}% → ${r}% 변경`});
+});
+
+/* ── 공지 목록 조회 ── */
+app.get('/api/notices',(req,res)=>res.json(NOTICES.slice(0,50)));
+
+/* ── 공지 등록 (관리자) ── */
+app.post('/api/admin/notice',adm,(req,res)=>{
+  const {title,content}=req.body;
+  if(!title||!content)return res.status(400).json({error:'제목과 내용을 입력하세요.'});
+  const notice={id:uuid(),title,content,createdAt:Date.now(),system:false};
+  NOTICES.unshift(notice); if(NOTICES.length>100)NOTICES.pop(); saveNotices();
+  broadcast({type:'NOTICE_NEW',data:notice});
+  res.json({message:'공지 등록 완료',notice});
+});
+
+/* ── 공지 삭제 (관리자) ── */
+app.delete('/api/admin/notice/:id',adm,(req,res)=>{
+  const idx=NOTICES.findIndex(n=>n.id===req.params.id);
+  if(idx<0)return res.status(404).json({error:'공지 없음'});
+  NOTICES.splice(idx,1); saveNotices();
+  broadcast({type:'NOTICE_DEL',data:{id:req.params.id}});
+  res.json({message:'공지 삭제 완료'});
+});
+
+/* ── 랭킹 (공개) ── */
 app.get('/api/ranking',(req,res)=>{
   const list=[];
   for(const u of USERS.values()){
     let total=Math.round(u.bal.KRW||0);
-    Object.entries(ASSETS).forEach(([sym,a])=>{
-      const qty=parseFloat(u.bal[sym]||0);
-      if(qty>0) total+=Math.round(qty*a.price);
-    });
-    list.push({
-      username: u.username,
-      studentId: String(u.studentId).replace(/(\d{2})\d+(\d{2})/,'$1**$2'),
-      isAdmin: u.isAdmin,
-      total
-    });
+    Object.entries(ASSETS).forEach(([sym,a])=>{const q=parseFloat(u.bal[sym]||0);if(q>0)total+=Math.round(q*a.price);});
+    list.push({username:u.username,displayName:u.displayName||u.username,isAdmin:u.isAdmin,total});
   }
   list.sort((a,b)=>b.total-a.total);
   res.json(list);
 });
+
+/* ── 전체 자금 초기화 (관리자) ── */
+app.post('/api/admin/resetall',adm,(req,res)=>{
+  let cnt=0;
+  for(const u of USERS.values()){if(!u.isAdmin){u.bal=mkBal(false);cnt++;}}
+  saveUsers();
+  broadcast({type:'ANNOUNCE',data:{message:`💰 전체 자금이 초기화되었습니다! (${cnt}명)`,ts:Date.now()}});
+  res.json({message:`${cnt}명 자금 초기화 완료`});
+});
+
+/* ── 파일 DB: 유저 영속 저장 ── */
+const DB_FILE=path.join(__dirname,'users_db.json');
+function loadUsers(){
+  try{
+    if(fs.existsSync(DB_FILE)){
+      const data=JSON.parse(fs.readFileSync(DB_FILE,'utf-8'));
+      data.forEach(u=>USERS.set(u.username,u));
+      console.log(`✅ 유저 ${data.length}명 로드`);
+    }
+  }catch(e){console.error('유저 DB 로드 실패:',e.message);}
+}
+function saveUsers(){
+  try{fs.writeFileSync(DB_FILE,JSON.stringify([...USERS.values()],null,2));}
+  catch(e){console.error('유저 DB 저장 실패:',e.message);}
+}
 
 app.get('/api/news',(req,res)=>res.json(NHIST.slice(0,10)));
 
@@ -634,13 +860,14 @@ app.post('/api/trade',auth,(req,res)=>{
     if(u.bal.KRW<total)return res.status(400).json({error:`잔액 부족 (필요 ${total.toLocaleString()}원, 보유 ${Math.floor(u.bal.KRW).toLocaleString()}원)`});
     u.bal.KRW=Math.round(u.bal.KRW-total);
     u.bal[sym]=+((u.bal[sym]||0)+qty).toFixed(6);
-    asset.mom+=0.003*Math.log(1+qty/10);
+    // mom 누적 상한선 ±0.12 이내로 제한
+    asset.mom=Math.min(0.12, asset.mom+0.003*Math.log(1+qty/10));
   }else{
     // 매도: 자산 반납, KRW 수령
     if((u.bal[sym]||0)<qty)return res.status(400).json({error:`보유 수량 부족 (보유: ${u.bal[sym]||0})`});
     u.bal[sym]=+((u.bal[sym]||0)-qty).toFixed(6);
     u.bal.KRW=Math.round(u.bal.KRW+total);
-    asset.mom-=0.003*Math.log(1+qty/10);
+    asset.mom=Math.max(-0.12, asset.mom-0.003*Math.log(1+qty/10));
   }
 
   const tx={id:uuid(),username:u.username,studentId:u.studentId,
@@ -662,7 +889,7 @@ app.get('/api/transactions',auth,(req,res)=>{
 app.get('/api/admin/users',adm,(req,res)=>{
   const list=[];
   for(const u of USERS.values())
-    list.push({username:u.username,studentId:u.studentId,isAdmin:u.isAdmin,bal:u.bal,createdAt:u.createdAt});
+    list.push({username:u.username,isAdmin:u.isAdmin,bal:u.bal,createdAt:u.createdAt});
   res.json(list);
 });
 
@@ -674,6 +901,7 @@ app.post('/api/admin/setbal',adm,(req,res)=>{
   const val=parseFloat(value);
   if(isNaN(val)||val<0)return res.status(400).json({error:'올바른 값을 입력하세요.'});
   u.bal[asset]=asset==='KRW'?Math.round(val):val;
+  saveUsers();
   res.json({message:`${targetUsername}의 ${asset} → ${val} 설정 완료`,bal:u.bal});
 });
 
@@ -697,7 +925,10 @@ app.post('/api/admin/setprice',adm,(req,res)=>{
   if(!a)return res.status(404).json({error:'자산 없음'});
   const p=parseFloat(price);
   if(!p||p<=0)return res.status(400).json({error:'가격 오류'});
-  a.prev=a.price; a.price=p; a.base=p;
+  a.prev=a.price; a.price=p;
+  a.base=p; // 관리자가 직접 설정한 경우에만 base 변경
+  // initBase와 캡 범위도 업데이트
+  a.initBase=p; a.minPrice=p*0.05; a.maxPrice=p*5.0;
   a.hist.push({t:Date.now(),p});
   broadcast({type:'PRICE',data:{assets:{[symbol.toUpperCase()]:{price:p,prev:a.prev,ch24:0}},ts:Date.now()}});
   res.json({message:`${symbol.toUpperCase()} 가격 → ${p.toLocaleString()}원`});
@@ -719,6 +950,31 @@ app.post('/api/admin/firenews',adm,(req,res)=>{
   fireNews();
   res.json({message:'뉴스 4개 즉시 발행 완료'});
 });
+
+/* ═══════════════════════════════════════════════════════
+   Google OAuth 라우트
+═══════════════════════════════════════════════════════ */
+
+// 1) Google 로그인 시작
+app.get('/api/auth/google',
+  passport.authenticate('google', { scope: ['profile', 'email'] })
+);
+
+// 2) Google 콜백
+app.get('/api/auth/google/callback',
+  passport.authenticate('google', { session: false, failureRedirect: process.env.AUTH_FAILURE_REDIRECT || '/login?error=google_failed' }),
+  (req, res) => {
+    const u = req.user;
+    const token = jwt.sign(
+      { id: u.id, username: u.username, isAdmin: u.isAdmin },
+      SECRET,
+      { expiresIn: '8h' }
+    );
+    const redirect = process.env.AUTH_SUCCESS_REDIRECT || '/';
+    // JWT를 쿼리스트링으로 전달 → 클라이언트에서 localStorage에 저장
+    res.redirect(`${redirect}?token=${token}`);
+  }
+);
 
 /* SPA 폴백 */
 app.get('*',(req,res)=>{
