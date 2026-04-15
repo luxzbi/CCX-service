@@ -17,19 +17,45 @@ const { v4: uuid }   = require('uuid');
 const session        = require('express-session');
 const passport       = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const rateLimit      = require('express-rate-limit');
+const helmet         = require('helmet');
 
 const app    = express();
 const server = http.createServer(app);
 const wss    = new WebSocket.Server({ server });
 
-const SECRET   = process.env.JWT_SECRET || 'ccx_secret_2025';
+const SECRET   = process.env.JWT_SECRET || 'ccx_secret_2025_CHANGE_ME';
 const ADMIN_ID = '10933';
 const PORT     = process.env.PORT || 3000;
 const PUB      = fs.existsSync(path.join(__dirname,'public'))
                   ? path.join(__dirname,'public') : __dirname;
 
-app.use(cors());
-app.use(express.json());
+/* ── 보안 헤더 ── */
+app.use(helmet({
+  contentSecurityPolicy: false, // CDN 스크립트 허용
+  crossOriginEmbedderPolicy: false,
+}));
+
+/* ── CORS: 환경변수로 허용 도메인 제한 ── */
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+app.use(cors({
+  origin: ALLOWED_ORIGIN,
+  methods: ['GET','POST','DELETE'],
+  allowedHeaders: ['Content-Type','Authorization'],
+}));
+
+/* ── Rate Limiting ── */
+// 전체 API: 5분에 300번
+app.use('/api/', rateLimit({ windowMs:5*60*1000, max:300, standardHeaders:true, legacyHeaders:false,
+  message:{error:'요청이 너무 많습니다. 잠시 후 다시 시도하세요.'} }));
+// 로그인/가입: 15분에 20번 (brute-force 방지)
+app.use(['/api/login','/api/register'], rateLimit({ windowMs:15*60*1000, max:20, standardHeaders:true, legacyHeaders:false,
+  message:{error:'로그인 시도가 너무 많습니다. 15분 후 다시 시도하세요.'} }));
+// 채팅: 1분에 30번
+app.use('/api/chat/', rateLimit({ windowMs:60*1000, max:30, standardHeaders:true, legacyHeaders:false,
+  message:{error:'메시지 전송이 너무 많습니다.'} }));
+
+app.use(express.json({ limit: '50kb' }));
 app.use(express.static(PUB));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'ccx_session_secret_2025',
@@ -333,7 +359,7 @@ NP('[국부펀드] 국부펀드, 국내 주식 비중 5%p 확대','💼',['NANO'
 NP('[필립스 곡선] "고용 호조에도 물가 안정" — 경기 연착륙 기대','📊',['SVCO','MKFL','FSKL'],[[0.01,0.03],[0.01,0.03],[0.01,0.03]]),
 /* ──────────── 코인 전용 ──────────── */
 NP('[업핏코인] 가상자산 규제 완화 법안 통과 — 기관 투자 허용','✅',['UPC'],[[0.07,0.17]]),
-NP('[다윗코인] 학급 내 희소성 부각 — 발행량 제한 재확인','💎',['DWC'],[[0.06,0.14]]),
+NP('[다윗코인] 희소성 부각 — 발행량 제한 재확인','💎',['DWC'],[[0.06,0.14]]),
 NP('[업핏코인] 거래소 해킹 사고 — 일시 유통 중단','🔓',['UPC'],[[-0.12,-0.04]]),
 NP('[다윗코인] 고래 지갑 대규모 매도 출현','🐋',['DWC'],[[-0.10,-0.03]]),
 NP('[업핏코인] 대형 기관투자자 매수 포지션 공개','🏛️',['UPC'],[[0.08,0.17]]),
@@ -464,6 +490,22 @@ const USERS = new Map(); // username → user obj
 const TXS   = [];       // 전체 거래 내역
 const NHIST = [];       // 뉴스 히스토리 (배치 단위)
 
+/* ── 파일 DB: 유저 영속 저장 ── */
+const DB_FILE=path.join(__dirname,'users_db.json');
+function loadUsers(){
+  try{
+    if(fs.existsSync(DB_FILE)){
+      const data=JSON.parse(fs.readFileSync(DB_FILE,'utf-8'));
+      data.forEach(u=>USERS.set(u.username,u));
+      console.log(`✅ 유저 ${data.length}명 로드`);
+    }
+  }catch(e){console.error('유저 DB 로드 실패:',e.message);}
+}
+function saveUsers(){
+  try{fs.writeFileSync(DB_FILE,JSON.stringify([...USERS.values()],null,2));}
+  catch(e){console.error('유저 DB 저장 실패:',e.message);}
+}
+
 function mkBal(isAdmin){
   const b={KRW: isAdmin ? 50_000_000 : 1_000_000};
   Object.keys(ASSETS).forEach(s=>{ b[s]=(s==='UPC'||s==='DWC')?(isAdmin?10000:100):0; });
@@ -508,7 +550,7 @@ if(!USERS.has('admin')){
   const now=Date.now();
   Object.values(ASSETS).forEach(a=>{
     let p=a.base;
-    for(let i=120;i>=0;i--){
+    for(let i=400;i>=0;i--){
       p=Math.max(a.minPrice||1,Math.min(a.maxPrice||p*100,p*(1+(Math.random()-0.495)*a.v)));
       a.hist.push({t:now-i*2000,p:+p.toFixed(2)});
     }
@@ -641,6 +683,24 @@ function broadcast(m){
   wss.clients.forEach(c=>{ if(c.readyState===WebSocket.OPEN)c.send(s); });
 }
 
+/* ═══════════════════════════════════════════════════════
+   채팅 저장소 (관리자 ↔ 멤버 1:1)
+═══════════════════════════════════════════════════════ */
+const WS_USERS = new Map(); // username → ws
+const CHATS    = new Map(); // roomKey  → [{id,from,text,ts}]
+
+function chatRoomKey(a, b){
+  // 항상 "admin:멤버username" 형태로 정규화
+  const admin = USERS.get(a)?.isAdmin ? a : b;
+  const member = admin === a ? b : a;
+  return `admin:${member}`;
+}
+
+function sendToUser(username, payload){
+  const ws = WS_USERS.get(username);
+  if(ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+}
+
 wss.on('connection',ws=>{
   // 연결 즉시 최근 히스토리(50개) 전송 — 하지만 UI는 REST로 이미 구성됨
   const ia={};
@@ -649,7 +709,50 @@ wss.on('connection',ws=>{
            history:a.hist.slice(-400).map(h=>({t:h.t,p:h.p}))};
   });
   ws.send(JSON.stringify({type:'INIT',data:{assets:ia,news:NHIST.slice(0,5)}}));
-  ws.on('error',console.error);
+
+  ws.on('message', raw => {
+    try {
+      const msg = JSON.parse(raw);
+      // WS 인증
+      if(msg.type === 'AUTH'){
+        try{
+          const u = jwt.verify(msg.token, SECRET);
+          ws._username = u.username;
+          WS_USERS.set(u.username, ws);
+        }catch{}
+        return;
+      }
+      // 채팅 메시지
+      if(msg.type === 'CHAT'){
+        if(!ws._username) return;
+        const fromUser = USERS.get(ws._username);
+        if(!fromUser) return;
+        const toUsername = (msg.to || '').trim();
+        const toUser = USERS.get(toUsername);
+        if(!toUser) return;
+        // 관리자 ↔ 멤버만 허용
+        if(!fromUser.isAdmin && !toUser.isAdmin) return;
+        if(fromUser.isAdmin && toUser.isAdmin) return;
+        const text = (msg.text || '').trim().slice(0, 200);
+        if(!text) return;
+        const roomKey = chatRoomKey(ws._username, toUsername);
+        if(!CHATS.has(roomKey)) CHATS.set(roomKey, []);
+        const room = CHATS.get(roomKey);
+        const chatMsg = {id:uuid(), from:ws._username, text, ts:Date.now()};
+        room.push(chatMsg);
+        if(room.length > 100) room.shift();
+        // 두 당사자에게 전송
+        const payload = {type:'CHAT', data:{room:roomKey, msg:chatMsg, to:toUsername}};
+        sendToUser(ws._username, payload);
+        sendToUser(toUsername,   payload);
+      }
+    }catch{}
+  });
+
+  ws.on('close', () => {
+    if(ws._username) WS_USERS.delete(ws._username);
+  });
+  ws.on('error', console.error);
 });
 
 /* ═══════════════════════════════════════════════════════
@@ -658,7 +761,13 @@ wss.on('connection',ws=>{
 function auth(req,res,next){
   const h=req.headers.authorization;
   if(!h?.startsWith('Bearer '))return res.status(401).json({error:'로그인 필요'});
-  try{ req.user=jwt.verify(h.slice(7),SECRET); next(); }
+  try{
+    req.user=jwt.verify(h.slice(7),SECRET);
+    // 정지 여부 실시간 체크
+    const u=USERS.get(req.user.username);
+    if(u?.banned)return res.status(403).json({error:'정지된 계정입니다.'});
+    next();
+  }
   catch{ res.status(401).json({error:'토큰 만료'}); }
 }
 function adm(req,res,next){ auth(req,res,()=>{ if(!req.user.isAdmin)return res.status(403).json({error:'관리자 권한 필요'}); next(); }); }
@@ -687,6 +796,7 @@ app.post('/api/login',(req,res)=>{
   if(!username||!password)return res.status(400).json({error:'아이디와 비밀번호를 입력하세요.'});
   const u=USERS.get(username);
   if(!u)return res.status(401).json({error:'존재하지 않는 아이디입니다.'});
+  if(u.banned)return res.status(403).json({error:'정지된 계정입니다. 관리자에게 문의하세요.'});
   if(!bcrypt.compareSync(password,u.pw))return res.status(401).json({error:'비밀번호가 올바르지 않습니다.'});
   const token=jwt.sign({id:u.id,username:u.username,isAdmin:u.isAdmin},SECRET,{expiresIn:'8h'});
   res.json({token,user:{username:u.username,isAdmin:u.isAdmin,bal:u.bal}});
@@ -805,7 +915,7 @@ app.get('/api/ranking',(req,res)=>{
   for(const u of USERS.values()){
     let total=Math.round(u.bal.KRW||0);
     Object.entries(ASSETS).forEach(([sym,a])=>{const q=parseFloat(u.bal[sym]||0);if(q>0)total+=Math.round(q*a.price);});
-    list.push({username:u.username,displayName:u.displayName||u.username,isAdmin:u.isAdmin,total});
+    list.push({username:u.username,displayName:u.displayName||u.username,isAdmin:u.isAdmin,total,online:WS_USERS.has(u.username)});
   }
   list.sort((a,b)=>b.total-a.total);
   res.json(list);
@@ -819,22 +929,6 @@ app.post('/api/admin/resetall',adm,(req,res)=>{
   broadcast({type:'ANNOUNCE',data:{message:`💰 전체 자금이 초기화되었습니다! (${cnt}명)`,ts:Date.now()}});
   res.json({message:`${cnt}명 자금 초기화 완료`});
 });
-
-/* ── 파일 DB: 유저 영속 저장 ── */
-const DB_FILE=path.join(__dirname,'users_db.json');
-function loadUsers(){
-  try{
-    if(fs.existsSync(DB_FILE)){
-      const data=JSON.parse(fs.readFileSync(DB_FILE,'utf-8'));
-      data.forEach(u=>USERS.set(u.username,u));
-      console.log(`✅ 유저 ${data.length}명 로드`);
-    }
-  }catch(e){console.error('유저 DB 로드 실패:',e.message);}
-}
-function saveUsers(){
-  try{fs.writeFileSync(DB_FILE,JSON.stringify([...USERS.values()],null,2));}
-  catch(e){console.error('유저 DB 저장 실패:',e.message);}
-}
 
 app.get('/api/news',(req,res)=>res.json(NHIST.slice(0,10)));
 
@@ -889,8 +983,40 @@ app.get('/api/transactions',auth,(req,res)=>{
 app.get('/api/admin/users',adm,(req,res)=>{
   const list=[];
   for(const u of USERS.values())
-    list.push({username:u.username,isAdmin:u.isAdmin,bal:u.bal,createdAt:u.createdAt});
+    list.push({username:u.username,displayName:u.displayName||u.username,isAdmin:u.isAdmin,banned:!!u.banned,bannedReason:u.bannedReason||'',bal:u.bal,createdAt:u.createdAt});
   res.json(list);
+});
+
+/* 회원 정지 */
+app.post('/api/admin/ban',adm,(req,res)=>{
+  const {targetUsername,reason}=req.body;
+  if(!targetUsername)return res.status(400).json({error:'대상 아이디 필요'});
+  const u=USERS.get(targetUsername);
+  if(!u)return res.status(404).json({error:'유저 없음'});
+  if(u.isAdmin)return res.status(400).json({error:'관리자는 정지할 수 없습니다.'});
+  u.banned=true;
+  u.bannedReason=(reason||'').trim().slice(0,200)||'관리자에 의해 정지됨';
+  u.bannedAt=Date.now();
+  saveUsers();
+  // 해당 유저의 WS 연결 강제 종료
+  const ws=WS_USERS.get(targetUsername);
+  if(ws&&ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify({type:'BANNED',data:{reason:u.bannedReason}}));
+    setTimeout(()=>ws.terminate(),500);
+  }
+  res.json({message:`${targetUsername} 정지 완료`});
+});
+
+/* 회원 정지 해제 */
+app.post('/api/admin/unban',adm,(req,res)=>{
+  const {targetUsername}=req.body;
+  const u=USERS.get(targetUsername);
+  if(!u)return res.status(404).json({error:'유저 없음'});
+  u.banned=false;
+  u.bannedReason='';
+  u.bannedAt=null;
+  saveUsers();
+  res.json({message:`${targetUsername} 정지 해제 완료`});
 });
 
 /* 잔고 직접 설정 (자금 조정) */
@@ -949,6 +1075,46 @@ app.get('/api/admin/transactions',adm,(req,res)=>res.json(TXS.slice(-300).revers
 app.post('/api/admin/firenews',adm,(req,res)=>{
   fireNews();
   res.json({message:'뉴스 4개 즉시 발행 완료'});
+});
+
+/* ═══════════════════════════════════════════════════════
+   채팅 API (관리자 ↔ 멤버 1:1)
+═══════════════════════════════════════════════════════ */
+
+/* 채팅 기록 조회 — 관리자는 누구와도, 멤버는 관리자와의 대화만 */
+app.get('/api/chat/:username', auth, (req,res)=>{
+  const me = USERS.get(req.user.username);
+  if(!me) return res.status(404).json({error:'유저 없음'});
+  const target = req.params.username;
+  const targetUser = USERS.get(target);
+  if(!targetUser) return res.status(404).json({error:'상대방 없음'});
+  // 권한 체크: 관리자 또는 자신과 관리자 사이 대화
+  if(!me.isAdmin && !targetUser.isAdmin) return res.status(403).json({error:'채팅은 관리자와만 가능합니다.'});
+  const roomKey = chatRoomKey(req.user.username, target);
+  res.json(CHATS.get(roomKey) || []);
+});
+
+/* 채팅 전송 (REST fallback — WS가 기본) */
+app.post('/api/chat/:username', auth, (req,res)=>{
+  const me = USERS.get(req.user.username);
+  if(!me) return res.status(404).json({error:'유저 없음'});
+  const target = req.params.username;
+  const targetUser = USERS.get(target);
+  if(!targetUser) return res.status(404).json({error:'상대방 없음'});
+  if(!me.isAdmin && !targetUser.isAdmin) return res.status(403).json({error:'채팅은 관리자와만 가능합니다.'});
+  if(me.isAdmin && targetUser.isAdmin) return res.status(400).json({error:'관리자끼리 채팅 불가'});
+  const text = (req.body.text || '').trim().slice(0, 200);
+  if(!text) return res.status(400).json({error:'메시지를 입력하세요.'});
+  const roomKey = chatRoomKey(req.user.username, target);
+  if(!CHATS.has(roomKey)) CHATS.set(roomKey, []);
+  const room = CHATS.get(roomKey);
+  const chatMsg = {id:uuid(), from:req.user.username, text, ts:Date.now()};
+  room.push(chatMsg);
+  if(room.length > 100) room.shift();
+  const payload = {type:'CHAT', data:{room:roomKey, msg:chatMsg, to:target}};
+  sendToUser(req.user.username, payload);
+  sendToUser(target, payload);
+  res.json(chatMsg);
 });
 
 /* ═══════════════════════════════════════════════════════
